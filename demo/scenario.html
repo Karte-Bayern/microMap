@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A network-free microMap scenario timeline demo for incident coordination and training.">
+  <title>microMap.js · Scenario timeline</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.45 system-ui, sans-serif; color: #17272d; }
+    #map { background: repeating-linear-gradient(0deg, transparent 0 58px, #81989a20 58px 60px), repeating-linear-gradient(90deg, #e8efeb 0 58px, #d8e4df 58px 60px); }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(370px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: 16px; border: 1px solid #bccac8; border-radius: 12px; background: #fffffff2; box-shadow: 0 8px 28px #0002; }
+    h1 { margin: 0 0 5px; font-size: 19px; } p { margin: 0 0 12px; color: #53666b; }
+    .timeline { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    button, select { min-height: 38px; border: 1px solid #aabbbd; border-radius: 7px; background: white; color: inherit; font: inherit; padding: 6px 10px; }
+    button { cursor: pointer; } button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #1769e0; outline-offset: 2px; }
+    #play { min-width: 86px; background: #1769e0; color: white; border-color: #1769e0; }
+    input[type=range] { width: 100%; accent-color: #1769e0; }
+    .time { min-width: 100px; text-align: right; font: 12px ui-monospace,monospace; }
+    .tools { display: flex; gap: 8px; margin: 10px 0 12px; } .tools button { flex: 1; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; color: #53666b; }
+    .legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 50%; background: var(--c); }
+    h2 { margin: 12px 0 4px; font-size: 13px; }
+    #events { margin: 0; padding-left: 18px; color: #43575d; font-size: 12px; }
+    #events li { margin: 3px 0; }
+    .hint { display: block; margin-top: 12px; font-size: 11px; color: #687c81; }
+    @media (max-width: 520px) { .panel { top: auto; bottom: 10px; max-height: 58vh; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel" aria-label="Scenario timeline controls">
+    <h1>Scenario timeline</h1>
+    <p>Replay a small response exercise, scrub to any moment and inject a new event. The same scenario format can drive games, logistics or training tools.</p>
+    <div class="timeline"><button id="play" type="button">Play</button><select id="speed" aria-label="Playback speed"><option value="1">1× speed</option><option value="4">4× speed</option><option value="12">12× speed</option></select><span class="time" id="clock">00:00 / 08:00</span></div>
+    <input id="seek" aria-label="Scenario time" type="range" min="0" max="480000" value="0" step="1000">
+    <div class="tools"><button id="inject" type="button">Inject event</button><button id="restart" type="button">Restart</button></div>
+    <div class="legend"><span style="--c:#1769e0">Engine</span><span style="--c:#15a47b">Medical</span><span style="--c:#6f42c1">Command</span><span style="--c:#e34a3d">Incident</span></div>
+    <h2>Exercise log</h2><ol id="events" aria-live="polite"><li>Ready · incoming report received</li></ol>
+    <small class="hint">Training data only. The map, tracks and timeline are local and need no tile server.</small>
+  </section>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.scenario.min.js"></script>
+  <script>
+    (function () {
+      var center = [11.577, 48.139];
+      var map = microMap('#map', { tiles: false, center: center, zoom: 13, maxZoom: 18, ariaLabel: 'Scenario playback map' });
+      var overlay = microMap.geojson(map);
+      var roadFeatures = [];
+      for (var i = -3; i <= 3; i++) {
+        var x = center[0] + i * .006;
+        var y = center[1] + i * .004;
+        roadFeatures.push({ type: 'Feature', id: 'v' + i, properties: { kind: 'road' }, geometry: { type: 'LineString', coordinates: [[x, center[1] - .018], [x + .002, center[1] + .018]] } });
+        roadFeatures.push({ type: 'Feature', id: 'h' + i, properties: { kind: 'road' }, geometry: { type: 'LineString', coordinates: [[center[0] - .03, y], [center[0] + .03, y + .001]] } });
+      }
+      roadFeatures.push({ type: 'Feature', id: 'incident', properties: { kind: 'incident', label: 'Incident' }, geometry: { type: 'Point', coordinates: [11.590, 48.144] } });
+      overlay.addSource('scene', { type: 'geojson', data: { type: 'FeatureCollection', features: roadFeatures } });
+      overlay.addLayer({ id: 'roads', type: 'line', source: 'scene', filter: ['==', ['get', 'kind'], 'road'], paint: { 'line-color': '#ffffff', 'line-width': 4 } });
+      overlay.addLayer({ id: 'units', type: 'circle', source: 'scene', filter: ['==', ['get', 'kind'], 'unit'], paint: { 'circle-color': ['get', 'color'], 'circle-radius': 9, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      overlay.addLayer({ id: 'unit-labels', type: 'symbol', source: 'scene', filter: ['==', ['get', 'kind'], 'unit'], layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-offset': [0, -1.7] }, paint: { 'text-color': '#17313f', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
+      overlay.addLayer({ id: 'incident', type: 'circle', source: 'scene', filter: ['==', ['get', 'kind'], 'incident'], paint: { 'circle-color': '#e34a3d', 'circle-radius': 11, 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } });
+      overlay.addLayer({ id: 'incident-label', type: 'symbol', source: 'scene', filter: ['==', ['get', 'kind'], 'incident'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, -1.8] }, paint: { 'text-color': '#8b2b25', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
+
+      var duration = 8 * 60 * 1000;
+      var scenario = microMap.scenario({
+        id: 'response-exercise', title: 'Response exercise', duration: duration,
+        entities: [
+          { id: 'engine', type: 'vehicle', properties: { role: 'engine' }, track: [
+            { time: 0, coordinates: [11.558, 48.128], status: 'available' }, { time: 60000, coordinates: [11.565, 48.132], status: 'dispatched' },
+            { time: 150000, coordinates: [11.576, 48.138], status: 'en route' }, { time: 250000, coordinates: [11.586, 48.143], status: 'on scene' },
+            { time: duration, coordinates: [11.590, 48.144], status: 'on scene' }
+          ] },
+          { id: 'medical', type: 'vehicle', properties: { role: 'medical' }, track: [
+            { time: 0, coordinates: [11.548, 48.150], status: 'available' }, { time: 115000, coordinates: [11.555, 48.150], status: 'dispatched' },
+            { time: 260000, coordinates: [11.570, 48.147], status: 'en route' }, { time: 390000, coordinates: [11.584, 48.145], status: 'on scene' },
+            { time: duration, coordinates: [11.588, 48.144], status: 'on scene' }
+          ] },
+          { id: 'command', type: 'unit', properties: { role: 'command' }, track: [
+            { time: 0, coordinates: [11.582, 48.120], status: 'available' }, { time: 100000, coordinates: [11.582, 48.126], status: 'dispatched' },
+            { time: 300000, coordinates: [11.585, 48.138], status: 'on scene' }, { time: duration, coordinates: [11.589, 48.142], status: 'on scene' }
+          ] }
+        ],
+        events: [
+          { time: 0, type: 'call', title: 'Incoming report · smoke seen near the industrial block' },
+          { time: 30000, type: 'dispatch', title: 'Engine dispatched' },
+          { time: 115000, type: 'dispatch', title: 'Medical unit dispatched' },
+          { time: 250000, type: 'arrival', title: 'First unit on scene' },
+          { time: 390000, type: 'arrival', title: 'Medical unit on scene' },
+          { time: duration, type: 'review', title: 'Exercise complete · review timeline' }
+        ]
+      });
+      var colors = { engine: '#1769e0', medical: '#15a47b', command: '#6f42c1' };
+      var seek = document.getElementById('seek');
+      var clock = document.getElementById('clock');
+      var play = document.getElementById('play');
+      var log = document.getElementById('events');
+      var eventItems = [];
+      function format(ms) { var seconds = Math.floor(ms / 1000); return String(Math.floor(seconds / 60)).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0'); }
+      function show(snapshot) {
+        var features = roadFeatures.slice();
+        snapshot.entities.forEach(function (entity) {
+          var role = entity.properties.role || entity.type;
+          features.push({ type: 'Feature', id: entity.id, properties: { kind: 'unit', color: colors[role] || '#1769e0', label: role + ' · ' + entity.status }, geometry: { type: 'Point', coordinates: entity.coordinates } });
+        });
+        overlay.getSource('scene').setData({ type: 'FeatureCollection', features: features });
+        seek.value = snapshot.time;
+        clock.textContent = format(snapshot.time) + ' / ' + format(snapshot.duration);
+      }
+      scenario.on('tick', function (event) { show(event.snapshot); });
+      scenario.on('event', function (event) {
+        eventItems.unshift(format(event.event.time) + ' · ' + event.event.title);
+        eventItems = eventItems.slice(0, 5);
+        log.replaceChildren.apply(log, eventItems.map(function (text) { var item = document.createElement('li'); item.textContent = text; return item; }));
+      });
+      scenario.on('play', function () { play.textContent = 'Pause'; });
+      scenario.on('pause', function () { play.textContent = 'Play'; });
+      scenario.on('scenariochange', function (event) { play.disabled = event.scenario.duration === 0; });
+      play.addEventListener('click', function () { scenario.isPlaying() ? scenario.pause() : scenario.play(); });
+      seek.addEventListener('input', function () { scenario.seek(+seek.value); });
+      document.getElementById('speed').addEventListener('change', function (event) { scenario.setSpeed(+event.target.value); });
+      document.getElementById('inject').addEventListener('click', function () { scenario.inject({ type: 'radio', title: 'Trainer note · confirm water supply', properties: { source: 'exercise-control' } }); });
+      document.getElementById('restart').addEventListener('click', function () { scenario.pause(); scenario.seek(0, { events: false }); eventItems = []; log.replaceChildren(); });
+      show(scenario.getSnapshot());
+    }());
+  </script>
+</body>
+</html>

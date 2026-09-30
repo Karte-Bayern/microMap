@@ -1,0 +1,257 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>microMap demo hash browser smoke test</title>
+<pre id="result">RUNNING</pre>
+<script>
+  (function () {
+    var errors = [];
+    var result = document.querySelector('#result');
+
+    function check(value, message) {
+      if (!value) errors.push(message);
+    }
+
+    function closeEnough(actual, expected) {
+      return Math.abs(actual - expected) < 0.000000001;
+    }
+
+    function wait(milliseconds) {
+      return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
+    }
+
+    function mockGeolocation(window, longitude, latitude) {
+      Object.defineProperty(window.navigator, 'geolocation', {
+        configurable: true,
+        value: {
+          getCurrentPosition: function (success) {
+            success({ coords: { longitude: longitude, latitude: latitude, accuracy: 14 } });
+          }
+        }
+      });
+    }
+
+    function load(frame, url) {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var expectedURL = new URL(url, document.baseURI).href;
+        function done(window) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          frame.onload = null;
+          resolve(window);
+        }
+        var timeout = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          reject(new Error('Timed out loading ' + url));
+        }, 5000);
+        frame.onload = function () {
+          if (frame.contentWindow && frame.contentWindow.map && typeof frame.contentWindow.map.getCenter === 'function') done(frame.contentWindow);
+        };
+        frame.src = url;
+        (function ready() {
+          var window = frame.contentWindow;
+          if (window && window.location.href === expectedURL && window.map && typeof window.map.getCenter === 'function') {
+            done(window);
+          } else if (!settled) {
+            setTimeout(ready, 20);
+          }
+        }());
+      });
+    }
+
+    function viewMatches(map, center, zoom, bearing, pitch) {
+      var actual = map.getCenter();
+      return closeEnough(actual[0], center[0]) && closeEnough(actual[1], center[1]) && closeEnough(map.getZoom(), zoom) &&
+        closeEnough(map.getBearing(), bearing) && closeEnough(map.getPitch(), pitch);
+    }
+
+    async function testRaster() {
+      var frame = document.createElement('iframe');
+      document.body.appendChild(frame);
+      var initialCenter = [11.123456789, 48.987654321];
+      var initialZoom = 7.25;
+      var initialBearing = 37;
+      var initialPitch = 20;
+      var window = await load(frame, '../demo/index.html?tiles=local#lon=' + initialCenter[0] + '&lat=' + initialCenter[1] + '&zoom=' + initialZoom + '&bearing=' + initialBearing + '&pitch=' + initialPitch + '&preload=1');
+      check(viewMatches(window.map, initialCenter, initialZoom, initialBearing, initialPitch), 'raster hash restores the initial camera');
+      check(window.navigationPreloadEnabled, 'raster hash restores the preload setting');
+      window.document.querySelector('#rotate-right').click();
+      check(closeEnough(window.map.getBearing(), initialBearing + 15), 'raster rotate control changes the bearing');
+      window.document.querySelector('#north').click();
+      window.document.querySelector('#pitch-down').click();
+      check(closeEnough(window.map.getBearing(), 0) && closeEnough(window.map.getPitch(), initialPitch - 10), 'raster camera controls reset north and reduce tilt');
+
+      var hashBeforeGPS = window.location.hash;
+      mockGeolocation(window, 12.345678, 48.123456);
+      window.document.querySelector('#locate').click();
+      await wait(0);
+      check(viewMatches(window.map, [12.345678, 48.123456], initialZoom, 0, initialPitch - 10), 'raster GPS control centers the map on a location fix');
+      check(!!window.document.querySelector('.micromap-location'), 'raster GPS control adds a location marker');
+      check(window.location.hash === hashBeforeGPS, 'raster GPS control never writes a precise location to the hash');
+
+      var nextCenter = [9.987654321, 47.123456789];
+      var nextZoom = 8.75;
+      var nextBearing = 112;
+      var nextPitch = 40;
+      window.map.setView(nextCenter, nextZoom);
+      window.map.setBearing(nextBearing);
+      window.map.setPitch(nextPitch);
+      await wait(10);
+      var savedHash = window.location.hash;
+      var params = new URLSearchParams(savedHash.slice(1));
+      check(params.get('preload') === '1', 'raster hash writes the preload setting');
+      check(closeEnough(Number(params.get('lon')), nextCenter[0]) && closeEnough(Number(params.get('lat')), nextCenter[1]) && closeEnough(Number(params.get('zoom')), nextZoom) && closeEnough(Number(params.get('bearing')), nextBearing) && closeEnough(Number(params.get('pitch')), nextPitch), 'raster hash writes the changed camera');
+      check(!params.has('gps'), 'raster hash never stores a GPS fix');
+
+      window = await load(frame, '../demo/index.html?tiles=local&hash-test=1' + savedHash);
+      check(viewMatches(window.map, nextCenter, nextZoom, nextBearing, nextPitch), 'raster reload restores the changed camera');
+      check(window.navigationPreloadEnabled, 'raster reload restores the changed preload setting');
+      frame.remove();
+    }
+
+    async function testVector() {
+      var frame = document.createElement('iframe');
+      document.body.appendChild(frame);
+      var initialCenter = [8.123456789, 46.987654321];
+      var initialZoom = 6.5;
+      var initialBearing = 25;
+      var initialPitch = 30;
+      var window = await load(frame, '../demo/vector.html?hash-test=1#source=offline-mvt&lon=' + initialCenter[0] + '&lat=' + initialCenter[1] + '&zoom=' + initialZoom + '&bearing=' + initialBearing + '&pitch=' + initialPitch + '&preload=1&points=1');
+      check(viewMatches(window.map, initialCenter, initialZoom, initialBearing, initialPitch), 'vector hash restores the initial camera');
+      check(window.document.querySelector('#source-select').value === 'offline-mvt', 'vector hash restores the selected source');
+      check(window.navigationPreloadEnabled, 'vector hash restores the preload setting');
+      check(window.document.querySelector('#show-points').checked, 'vector hash restores the point-detail setting');
+
+      window.setSourceInfo({ label: 'Attribution example', kind: 'tilejson', endpoint: '/tiles.json', attribution: { label: '© OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright' } });
+      var providerAttribution = window.document.querySelector('#map-attribution');
+      check(!providerAttribution.hidden && providerAttribution.textContent === '© OpenStreetMap contributors', 'Source attribution stays visible on the map');
+      check(providerAttribution.querySelector('a').getAttribute('href') === 'https://www.openstreetmap.org/copyright', 'Source attribution links to the required source');
+
+      var routeToggle = window.document.querySelector('#show-route');
+      routeToggle.checked = true;
+      routeToggle.dispatchEvent(new Event('change', { bubbles: true }));
+      check(!!window.document.querySelector('.micromap-route'), 'vector demo draws the optional example route');
+      check(new URLSearchParams(window.location.hash.slice(1)).get('route') === '1', 'vector hash stores the example-route setting');
+
+      var fetchCalls = [];
+      var originalFetch = window.fetch;
+      window.fetch = function (url, init) {
+        fetchCalls.push([url, init]);
+        return Promise.resolve({ ok: true });
+      };
+      var relativeTile = '/tiles/7/8/9.mvt';
+      var remoteTile = 'https://example.test/tiles/7/8/9.mvt';
+      await window.proxiedFetch(relativeTile);
+      await window.proxiedFetch(remoteTile);
+      await window.proxiedFetch('data:application/octet-stream,fixture');
+      window.fetch = originalFetch;
+      check(fetchCalls.some(function (call) {
+        return call[0] === relativeTile;
+      }), 'vector cache keeps relative MVT URLs on the local cache origin');
+      check(fetchCalls.some(function (call) {
+        return call[0] === window.tilecacheOrigin + '/fetch?u=' + encodeURIComponent(remoteTile);
+      }), 'vector cache proxies remote MVT URLs');
+      check(fetchCalls.some(function (call) {
+        return call[0] === 'data:application/octet-stream,fixture';
+      }), 'vector cache leaves data URLs direct');
+
+      var proxyFailureCalls = [];
+      var proxyFailure;
+      window.fetch = function (url) {
+        proxyFailureCalls.push(url);
+        return Promise.reject(new Error('offline'));
+      };
+      try {
+        await window.proxiedFetch('https://example.test/blocked.mvt');
+      } catch (error) {
+        proxyFailure = error;
+      }
+      window.fetch = originalFetch;
+      check(proxyFailureCalls.length === 1 && proxyFailureCalls[0] === window.tilecacheOrigin + '/fetch?u=' + encodeURIComponent('https://example.test/blocked.mvt'), 'vector cache never falls back to a direct remote request when the proxy is unavailable');
+      check(proxyFailure && /Local vector cache proxy is unavailable/.test(proxyFailure.message), 'vector cache reports a missing local proxy clearly');
+
+      var vectorHashBeforeGPS = window.location.hash;
+      mockGeolocation(window, 7.654321, 46.234567);
+      window.document.querySelector('#locate').click();
+      await wait(0);
+      check(viewMatches(window.map, [7.654321, 46.234567], initialZoom, initialBearing, initialPitch), 'vector GPS control centers the map on a location fix');
+      check(!!window.document.querySelector('.micromap-location'), 'vector GPS control adds a location marker');
+      check(window.location.hash === vectorHashBeforeGPS, 'vector GPS control never writes a precise location to the hash');
+
+      var picker = window.document.querySelector('#source-select');
+      var customURL = window.document.querySelector('#custom-url');
+      var customTemplate = '/hash-fixture/{z}/{x}/{y}.mvt';
+      picker.value = 'custom-xyz';
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+      customURL.value = customTemplate;
+      customURL.dispatchEvent(new Event('input', { bubbles: true }));
+      window.document.querySelector('#source-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+      var mapStylePicker = window.document.querySelector('#map-style-select');
+      mapStylePicker.value = 'dark';
+      mapStylePicker.dispatchEvent(new Event('change', { bubbles: true }));
+      var expectedBackground = window.document.createElement('div');
+      expectedBackground.style.background = window.palettes.dark.mapBackground;
+      check(window.document.querySelector('#map').style.background === expectedBackground.style.background, 'vector map style repaints the background on selection');
+
+      var buildingMode = window.document.querySelector('#building-mode');
+      buildingMode.value = 'flat';
+      buildingMode.dispatchEvent(new Event('change', { bubbles: true }));
+      check(window.buildingMode === 'flat', 'vector playground switches generic buildings to flat roofs');
+      var buildingHeight = window.document.querySelector('#building-height');
+      buildingHeight.value = '18';
+      buildingHeight.dispatchEvent(new Event('input', { bubbles: true }));
+      check(window.buildingHeight === 18, 'vector playground changes the fallback building height');
+      var preset = window.document.querySelector('#view-preset');
+      preset.value = 'oblique';
+      preset.dispatchEvent(new Event('change', { bubbles: true }));
+      check(closeEnough(window.map.getBearing(), 35) && closeEnough(window.map.getPitch(), 42), 'vector playground applies an oblique camera preset');
+
+      var nextCenter = [5.987654321, 45.123456789];
+      var nextZoom = 9.125;
+      var nextBearing = 200;
+      var nextPitch = 50;
+      window.map.setView(nextCenter, nextZoom);
+      window.map.setBearing(nextBearing);
+      window.map.setPitch(nextPitch);
+      await wait(10);
+      var savedHash = window.location.hash;
+      var params = new URLSearchParams(savedHash.slice(1));
+      check(params.get('source') === 'custom-xyz', 'vector hash writes the custom-source setting');
+      check(params.get('url') === customTemplate, 'vector hash encodes the custom URL');
+      check(params.get('preload') === '1', 'vector hash writes the preload setting');
+      check(params.get('points') === '1', 'vector hash writes the point-detail setting');
+      check(params.get('route') === '1', 'vector hash writes the example-route setting');
+      check(params.get('style') === 'dark', 'vector hash writes the map-style setting');
+      check(params.get('buildings') === 'flat', 'vector hash writes the building-mode setting');
+      check(params.get('buildingheight') === '18', 'vector hash writes the fallback building height');
+      check(closeEnough(Number(params.get('bearing')), nextBearing) && closeEnough(Number(params.get('pitch')), nextPitch), 'vector hash writes the changed camera orientation');
+      check(!params.has('gps'), 'vector hash never stores a GPS fix');
+
+      window = await load(frame, '../demo/vector.html?hash-test=1' + savedHash);
+      check(viewMatches(window.map, nextCenter, nextZoom, nextBearing, nextPitch), 'vector reload restores the changed camera');
+      check(window.document.querySelector('#source-select').value === 'custom-xyz', 'vector reload restores the custom-source setting');
+      check(window.document.querySelector('#custom-url').value === customTemplate, 'vector reload restores the custom URL');
+      check(window.navigationPreloadEnabled, 'vector reload restores the changed preload setting');
+      check(window.document.querySelector('#show-points').checked, 'vector reload restores the point-detail setting');
+      check(window.document.querySelector('#show-route').checked && !!window.document.querySelector('.micromap-route'), 'vector reload restores the example route');
+      check(window.document.querySelector('#map-style-select').value === 'dark', 'vector reload restores the map-style setting');
+      check(window.document.querySelector('#building-mode').value === 'flat', 'vector reload restores the building-mode setting');
+      check(window.document.querySelector('#building-height').value === '18', 'vector reload restores the fallback building height');
+      frame.remove();
+    }
+
+    Promise.resolve()
+      .then(testRaster)
+      .then(testVector)
+      .then(function () {
+        result.textContent = errors.length ? 'FAIL: ' + errors.join(', ') : 'PASS';
+        document.title = errors.length ? 'FAIL' : 'PASS';
+      }, function (error) {
+        result.textContent = 'FAIL: ' + (error && error.message ? error.message : String(error));
+        document.title = 'FAIL';
+      });
+  }());
+</script>

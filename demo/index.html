@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="microMap.js demo: a dependency-free interactive XYZ raster map.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>microMap.js demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.4 system-ui, sans-serif; }
+    #map { background: #dce4e8; }
+    .panel {
+      position: fixed;
+      z-index: 10;
+      top: 12px;
+      left: 12px;
+      max-width: min(360px, calc(100vw - 24px));
+      padding: 12px;
+      border: 1px solid #0002;
+      border-radius: 8px;
+      background: #fffc;
+      box-shadow: 0 4px 18px #0002;
+      backdrop-filter: blur(8px);
+    }
+    .panel strong { display: block; margin-bottom: 7px; }
+    .hint { margin: 0 0 7px; }
+    .status { min-height: 1.4em; margin: 5px 0 0; color: #8a2d12; }
+    .preload-note { min-height: 1.4em; margin: 6px 0 0; color: #46545b; font-size: 12px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+    button { min-width: 44px; min-height: 44px; padding: 6px 11px; cursor: pointer; }
+    button:focus-visible { outline: 3px solid #1769e0; outline-offset: 2px; }
+    output { font-family: ui-monospace, monospace; }
+    .demos { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 8px; font-size: 13px; }
+    .demos a[aria-current] { font-weight: 600; color: inherit; text-decoration: none; }
+    .source-picker { display: flex; align-items: center; gap: 7px; margin: 3px 0 8px; }
+    .source-picker select { min-height: 36px; max-width: 100%; }
+    .source-attribution { position: fixed; z-index: 12; right: 6px; bottom: 4px; max-width: min(850px, calc(100vw - 12px)); max-height: 25vh; overflow: auto; padding: 3px 6px; background: #fffd; color: #243039; font: 11px/1.4 system-ui, sans-serif; }
+    .source-attribution a { color: #1769a0; }
+    .places { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .places button { min-height: 36px; }
+    .camera-controls {
+      position: fixed;
+      z-index: 10;
+      top: 150px;
+      right: 10px;
+      display: grid;
+      grid-template-columns: repeat(2, 44px);
+      gap: 7px;
+    }
+    .camera-controls button { min-width: 44px; padding: 4px; background: #fffc; border: 1px solid #0002; border-radius: 8px; box-shadow: 0 3px 12px #0002; }
+    .camera-controls #locate { grid-column: span 2; }
+    .micromap-popup-content strong { display: block; margin-bottom: 2px; }
+    .location-status { min-height: 1.4em; margin: 5px 0 0; color: #46545b; font-size: 12px; }
+    @media (max-width: 480px) {
+      .panel { top: auto; bottom: 12px; padding: 10px; }
+      .panel strong { margin-bottom: 4px; }
+      .hint { display: none; }
+      .buttons { margin-top: 7px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <aside id="source-attribution" class="source-attribution" aria-label="Map data attribution"></aside>
+  <section class="panel" aria-label="Map demo controls">
+    <strong>microMap.js</strong>
+    <nav class="demos" aria-label="Demos">
+      <a href="index.html" aria-current="page">Raster</a>
+      <a href="vector.html">MVT vector</a>
+      <a href="geojson.html">GeoJSON</a>
+      <a href="field.html">Field annotations</a>
+      <a href="measure.html">Measurements</a>
+      <a href="simplify.html">Simplify</a>
+      <a href="../bench/browser.html">Playground</a>
+    </nav>
+    <label class="source-picker" for="raster-source">Raster source:
+      <select id="raster-source">
+        <option value="osm">OpenStreetMap tiles</option>
+        <option value="karte-bayern">Karte.Bayern aerial imagery</option>
+      </select>
+    </label>
+    <p id="kb-source-note" class="preload-note" hidden>Karte.Bayern imagery is available on this project's GitHub Pages site, through <code>make dev</code>, or on a Karte.Bayern origin.</p>
+    <p class="hint">Drag, pinch, use the mouse wheel, double-click or focus the map and use arrow and +/- keys. The controls at the right zoom, rotate and tilt (click the compass to face north again) and show your location. Click a marker for its popup. Right-drag, Ctrl-drag, two fingers or Shift+arrow keys rotate and tilt. Right-click or open Actions for map commands. Shift-drag to measure an area.</p>
+    <div>View: <output id="view"></output></div>
+    <div>Clicked: <output id="clicked">—</output></div>
+    <div>Selected: <output id="selected">—</output></div>
+    <p id="tile-status" class="status" role="status" hidden></p>
+    <p id="preload-status" class="preload-note">Navigation preloading is off.</p>
+    <p id="location-status" class="location-status" role="status" hidden></p>
+    <div class="places" id="places" aria-label="Fly to"></div>
+    <div class="buttons">
+      <button id="actions" type="button" aria-label="Open map actions" aria-haspopup="menu">Actions</button>
+      <button id="preload" type="button" aria-pressed="false">Enable navigation preload</button>
+    </div>
+  </section>
+  <section class="camera-controls" aria-label="Camera controls">
+    <button id="rotate-left" type="button" aria-label="Rotate map left by 15 degrees">↶</button>
+    <button id="rotate-right" type="button" aria-label="Rotate map right by 15 degrees">↷</button>
+    <button id="pitch-down" type="button" aria-label="Reduce map tilt">T−</button>
+    <button id="pitch-up" type="button" aria-label="Increase map tilt">T+</button>
+    <button id="locate" type="button" aria-label="Show my current location">GPS</button>
+  </section>
+
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.camera.min.js"></script>
+  <script src="../lib/microMap.compose.min.js"></script>
+  <script src="../lib/microMap.ui.min.js"></script>
+  <script>
+    // ?tiles=local routes tile requests through tools/tilecache instead of
+    // the real OpenStreetMap server, so DevTools' "disable cache" can be
+    // used to inspect the first-hit render without repeatedly hitting OSM.
+    // Run `make dev` first; see tools/tilecache/README.md.
+    var requestedRasterSource = new URLSearchParams(location.search).get('tiles');
+    var useLocalCache = requestedRasterSource === 'local';
+    var activeRasterSource = useLocalCache ? 'local' : 'osm';
+    var rasterSourcePicker = document.querySelector('#raster-source');
+    var sourceAttribution = document.querySelector('#source-attribution');
+    var kbSourceOption = rasterSourcePicker.querySelector('option[value="karte-bayern"]');
+    var localTilecacheHost = /^(127\.0\.0\.1|localhost|\[?::1\]?)$/i.test(location.hostname) && location.port === '8091';
+    var microMapPages = location.hostname === 'karte-bayern.github.io' || location.hostname === 'simonwaldherr.github.io';
+    var karteBayernAvailable = /^(?:.+\.)?karte\.bayern$/i.test(location.hostname) || localTilecacheHost || microMapPages;
+    var karteBayernOrigin = 'https://karte.bayern';
+    var osmTiles = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    var aerialTiles = localTilecacheHost ? function (z, x, y) {
+      return '/fetch?u=' + encodeURIComponent(karteBayernOrigin + '/sat/' + z + '/' + x + '/' + y + '?fmt=webp');
+    } : karteBayernOrigin + '/sat/{z}/{x}/{y}?fmt=webp';
+    var localTiles = 'http://127.0.0.1:8091/{z}/{x}/{y}.png';
+    var osmAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+    var aerialNotices = [];
+    var aerialTileCredits = Object.create(null);
+    var aerialAttributionVersion = 0;
+    var start = [12.491, 48.63];
+    var maxPitch = 60;
+    var initialView = readHashView();
+    var map = microMap('#map', {
+      center: initialView.center || start,
+      zoom: initialView.zoom == null ? 12 : initialView.zoom,
+      bearing: initialView.bearing == null ? 0 : initialView.bearing,
+      pitch: initialView.pitch == null ? 0 : initialView.pitch,
+      maxPitch: maxPitch,
+      maxZoom: 19,
+      tiles: useLocalCache ? localTiles : osmTiles,
+      ariaLabel: 'Interactive map of Dingolfing',
+      contextMenu: function (event) { return menuItems(event); }
+    });
+
+    var view = document.querySelector('#view');
+    var clicked = document.querySelector('#clicked');
+    var selected = document.querySelector('#selected');
+    var tileStatus = document.querySelector('#tile-status');
+    var preloadStatus = document.querySelector('#preload-status');
+    var preloadButton = document.querySelector('#preload');
+    var locationStatus = document.querySelector('#location-status');
+    var rotateLeftButton = document.querySelector('#rotate-left');
+    var rotateRightButton = document.querySelector('#rotate-right');
+    var pitchDownButton = document.querySelector('#pitch-down');
+    var pitchUpButton = document.querySelector('#pitch-up');
+    var locateButton = document.querySelector('#locate');
+    rasterSourcePicker.value = 'osm';
+    sourceAttribution.innerHTML = osmAttribution;
+    kbSourceOption.disabled = true;
+    document.querySelector('#kb-source-note').hidden = karteBayernAvailable;
+    var aerialTileErrors = Object.create(null);
+    var aerialErrorWindowStart = 0;
+    function appendAttributionText(value) {
+      if (sourceAttribution.childNodes.length) sourceAttribution.appendChild(document.createTextNode(' · '));
+      sourceAttribution.appendChild(document.createTextNode(value));
+    }
+    function renderAttribution() {
+      if (activeRasterSource !== 'karte-bayern') {
+        sourceAttribution.innerHTML = osmAttribution;
+        return;
+      }
+      sourceAttribution.textContent = '';
+      sourceAttribution.appendChild(document.createTextNode('Imagery: '));
+      aerialNotices.forEach(function (notice, index) {
+        if (index) sourceAttribution.appendChild(document.createTextNode(' · '));
+        var item = document.createElement('span');
+        item.textContent = notice.attribution;
+        sourceAttribution.appendChild(item);
+        if (notice.license_url && /^https?:\/\//.test(notice.license_url)) {
+          var license = document.createElement('a');
+          license.href = notice.license_url;
+          license.textContent = ' [license]';
+          license.rel = 'license noopener noreferrer';
+          license.target = '_blank';
+          sourceAttribution.appendChild(license);
+        }
+      });
+      Object.keys(aerialTileCredits).forEach(function (credit) {
+        appendAttributionText(credit);
+      });
+    }
+    function setRasterSource(source, updateUrl) {
+      if (source === 'karte-bayern' && (!karteBayernAvailable || !aerialNotices.length)) return;
+      activeRasterSource = source;
+      aerialAttributionVersion++;
+      aerialTileCredits = Object.create(null);
+      rasterSourcePicker.value = source === 'karte-bayern' ? 'karte-bayern' : 'osm';
+      if (source !== 'karte-bayern') setNavigationPreload(false);
+      else updatePreloadControl();
+      map.setTiles(source === 'karte-bayern' ? aerialTiles : source === 'local' ? localTiles : osmTiles,
+        { crossOrigin: source === 'karte-bayern' && !localTilecacheHost ? 'anonymous' : null });
+      renderAttribution();
+      if (updateUrl) {
+        var url = new URL(location.href);
+        url.searchParams.set('tiles', source);
+        history.replaceState(null, '', url.pathname + url.search + url.hash);
+      }
+    }
+    if (karteBayernAvailable) {
+      var noticesURL = karteBayernOrigin + '/api/orthophoto/sources?scope=runtime';
+      if (localTilecacheHost) noticesURL = '/fetch?u=' + encodeURIComponent(noticesURL);
+      fetch(noticesURL, { cache: 'no-store' }).then(function (response) {
+        if (!response.ok) throw new Error('source contract unavailable');
+        return response.json();
+      }).then(function (data) {
+        if (!data || !Array.isArray(data.sources) || !data.sources.length || data.sources.some(function (notice) { return !notice.attribution; })) {
+          throw new Error('source contract incomplete');
+        }
+        aerialNotices = data.sources;
+        kbSourceOption.disabled = false;
+        if (requestedRasterSource === 'karte-bayern') setRasterSource('karte-bayern', false);
+      }).catch(function () {
+        if (requestedRasterSource === 'karte-bayern') {
+          tileStatus.hidden = false;
+          tileStatus.textContent = 'Karte.Bayern imagery source credits are unavailable; showing OpenStreetMap.';
+        }
+      });
+    } else if (requestedRasterSource === 'karte-bayern') {
+      tileStatus.hidden = false;
+      tileStatus.textContent = 'Karte.Bayern imagery needs the local development proxy or a Karte.Bayern origin.';
+    }
+    rasterSourcePicker.addEventListener('change', function () {
+      setRasterSource(rasterSourcePicker.value, true);
+      tileStatus.hidden = true;
+      aerialTileErrors = Object.create(null);
+      aerialErrorWindowStart = 0;
+    });
+    var navigationPreloadEnabled = initialView.preload;
+    var lastNavigationCenter = null;
+    var restoringHash = false;
+    var suppressHash = false;
+    var locationMarker = null;
+
+    function coordinates(lonLat) {
+      return lonLat[1].toFixed(5) + ', ' + lonLat[0].toFixed(5);
+    }
+
+    function hashNumber(params, name, minimum, maximum) {
+      var text = params.get(name);
+      var value = Number(text);
+      return text !== null && text !== '' && isFinite(value) && value >= minimum && value <= maximum ? value : null;
+    }
+
+    function readHashView() {
+      var params = new URLSearchParams(location.hash.slice(1));
+      var longitude = hashNumber(params, 'lon', -180, 180);
+      var latitude = hashNumber(params, 'lat', -85.0511287798, 85.0511287798);
+      var zoom = hashNumber(params, 'zoom', 0, 19);
+      return {
+        center: longitude === null || latitude === null ? null : [longitude, latitude],
+        zoom: zoom,
+        bearing: hashNumber(params, 'bearing', 0, 360),
+        pitch: hashNumber(params, 'pitch', 0, maxPitch),
+        preload: params.get('preload') === '1'
+      };
+    }
+
+    function updateHash() {
+      if (restoringHash || suppressHash) return;
+      var center = map.getCenter();
+      var params = new URLSearchParams();
+      params.set('lon', String(center[0]));
+      params.set('lat', String(center[1]));
+      params.set('zoom', String(map.getZoom()));
+      params.set('bearing', String(map.getBearing()));
+      params.set('pitch', String(map.getPitch()));
+      if (navigationPreloadEnabled) params.set('preload', '1');
+      var hash = params.toString();
+      if (location.hash.slice(1) !== hash) {
+        history.replaceState(null, '', location.pathname + location.search + '#' + hash);
+      }
+    }
+
+    function menuItems(event) {
+      return [
+        { label: 'Center here', onClick: function () { map.setView(event.lonLat); } },
+        { label: 'Zoom in here', onClick: function () { map.setZoom(map.getZoom() + 1, event.point, 250); } },
+        { label: 'Dingolfing', onClick: function () { map.setView(start, 12); } },
+        { label: 'Fit region', onClick: function () { map.fitBounds([12.25, 48.48, 12.78, 48.82], 40); } },
+        '-',
+        { label: coordinates(event.lonLat), disabled: true }
+      ];
+    }
+
+    function updateView() {
+      var center = map.getCenter();
+      view.textContent = coordinates(center) + ' · z' + map.getZoom().toFixed(2) +
+        ' · b' + map.getBearing().toFixed(0) + '° · t' + map.getPitch().toFixed(0) + '°';
+      updateCameraControls();
+      updateHash();
+    }
+
+    function updateCameraControls() {
+      var bearing = map.getBearing();
+      var pitch = map.getPitch();
+      pitchDownButton.disabled = pitch === 0;
+      pitchUpButton.disabled = pitch === maxPitch;
+      pitchDownButton.title = 'Reduce tilt (' + pitch.toFixed(0) + '°)';
+      pitchUpButton.title = 'Increase tilt (' + pitch.toFixed(0) + '°)';
+    }
+
+    function locationElement() {
+      var dot = document.createElement('div');
+      dot.className = 'micromap-location';
+      dot.setAttribute('aria-hidden', 'true');
+      dot.title = 'Current location';
+      dot.style.cssText = 'position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border:3px solid #fff;' +
+        'border-radius:50%;background:#1677e8;box-shadow:0 1px 5px rgba(0,0,0,.45);pointer-events:none';
+      return dot;
+    }
+
+    function showLocationError(error) {
+      locateButton.disabled = false;
+      locationStatus.hidden = false;
+      var messages = {
+        1: 'Location permission was denied.',
+        2: 'Your location is currently unavailable.',
+        3: 'Finding your location timed out.'
+      };
+      locationStatus.textContent = messages[error && error.code] || 'Your location could not be determined. Use HTTPS or localhost and allow location access.';
+    }
+
+    function showCurrentLocation() {
+      var geolocation = window.navigator && window.navigator.geolocation;
+      if (!geolocation) {
+        showLocationError();
+        return;
+      }
+      locateButton.disabled = true;
+      locationStatus.hidden = false;
+      locationStatus.textContent = 'Finding your current location…';
+      geolocation.getCurrentPosition(function (position) {
+        locateButton.disabled = false;
+        var coords = position && position.coords;
+        var longitude = coords && Number(coords.longitude);
+        var latitude = coords && Number(coords.latitude);
+        if (!isFinite(longitude) || !isFinite(latitude) || latitude < -85.0511287798 || latitude > 85.0511287798) {
+          showLocationError();
+          return;
+        }
+        var point = [longitude, latitude];
+        if (locationMarker) locationMarker.setLonLat(point);
+        else locationMarker = map.addMarker(point, { element: locationElement() });
+        var accuracy = Number(coords.accuracy);
+        locationStatus.textContent = 'Current location shown' + (isFinite(accuracy) ? ' (±' + Math.round(accuracy) + ' m).' : '.');
+        // A copied link should not leak a freshly granted GPS fix. The marker
+        // stays visible, while the next deliberate map movement updates state.
+        suppressHash = true;
+        map.setView(point);
+        suppressHash = false;
+      }, showLocationError, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+    }
+
+    function headingBetween(previous, next) {
+      var east = (next[0] - previous[0]) * Math.cos((previous[1] + next[1]) * Math.PI / 360);
+      var north = next[1] - previous[1];
+      if (Math.abs(east) + Math.abs(north) < 0.000001) return null;
+      return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+    }
+
+    function updateNavigationPreload() {
+      if (!navigationPreloadEnabled) return;
+      var center = map.getCenter();
+      var heading = lastNavigationCenter && headingBetween(lastNavigationCenter, center);
+      var current = map.getNavigation();
+      map.setNavigation({
+        position: center,
+        heading: heading == null ? (current && current.heading != null ? current.heading : 90) : heading,
+        speed: 13.9,
+        lookAhead: 20
+      });
+      lastNavigationCenter = center;
+    }
+
+    function updatePreloadControl() {
+      preloadButton.disabled = activeRasterSource !== 'karte-bayern';
+      preloadButton.setAttribute('aria-pressed', String(navigationPreloadEnabled));
+      preloadButton.textContent = navigationPreloadEnabled ? 'Disable navigation preload' : 'Enable navigation preload';
+      preloadStatus.textContent = activeRasterSource !== 'karte-bayern'
+        ? 'Navigation preloading is unavailable with OpenStreetMap standard tiles.'
+        : navigationPreloadEnabled
+        ? 'Warming one surrounding ring and the next detail zoom; pans update the travel direction.'
+        : 'Navigation preloading is off.';
+    }
+
+    function setNavigationPreload(enabled) {
+      navigationPreloadEnabled = !!enabled && activeRasterSource === 'karte-bayern';
+      if (navigationPreloadEnabled) {
+        lastNavigationCenter = map.getCenter();
+        map.setPreload({ around: 1, zoom: 1, maxTiles: 24, delay: 160 });
+        map.setNavigation({ position: lastNavigationCenter, heading: 90, speed: 13.9, lookAhead: 20 });
+      } else {
+        map.setPreload(false);
+        map.setNavigation(null);
+        lastNavigationCenter = null;
+      }
+      updatePreloadControl();
+    }
+
+    map.on('moveend', updateView).on('resize', updateView).on('load', updateView);
+    map.on('rotate', updateCameraControls).on('pitch', updateCameraControls);
+    map.on('moveend', updateNavigationPreload);
+    window.addEventListener('hashchange', function () {
+      restoringHash = true;
+      var nextView = readHashView();
+      setNavigationPreload(nextView.preload);
+      if (nextView.center || nextView.zoom != null) {
+        map.setView(nextView.center || map.getCenter(), nextView.zoom == null ? map.getZoom() : nextView.zoom);
+      }
+      if (nextView.bearing != null) map.setBearing(nextView.bearing);
+      if (nextView.pitch != null) map.setPitch(nextView.pitch);
+      restoringHash = false;
+      updateView();
+    });
+    map.on('click', function (event) {
+      clicked.textContent = event.lonLat[1].toFixed(6) + ', ' + event.lonLat[0].toFixed(6);
+    });
+    map.on('boxselect', function (event) {
+      selected.textContent = (event.widthMeters / 1000).toFixed(2) + ' × ' + (event.heightMeters / 1000).toFixed(2) + ' km';
+    });
+
+    function showTileError(event, preloadOnly) {
+      if (preloadOnly && activeRasterSource === 'karte-bayern') return;
+      if (activeRasterSource === 'karte-bayern' && event) {
+        var now = Date.now();
+        if (!aerialErrorWindowStart || now - aerialErrorWindowStart > 5000) {
+          aerialTileErrors = Object.create(null);
+          aerialErrorWindowStart = now;
+        }
+        var tileKey = event.z + '/' + event.x + '/' + event.y;
+        aerialTileErrors[tileKey] = true;
+        if (Object.keys(aerialTileErrors).length < 3) return;
+        setRasterSource('osm', true);
+        aerialTileErrors = Object.create(null);
+        aerialErrorWindowStart = 0;
+        tileStatus.hidden = false;
+        tileStatus.textContent = 'Karte.Bayern aerial tiles failed; switched to OpenStreetMap.';
+        return;
+      }
+      tileStatus.hidden = false;
+      tileStatus.textContent = activeRasterSource === 'osm' && tileStatus.textContent.indexOf('switched to OpenStreetMap') >= 0
+        ? 'OpenStreetMap tiles also failed. Check your connection.'
+        : 'Some map tiles could not be loaded. Check your connection.';
+    }
+    map.on('tileerror', function (event) { showTileError(event, false); });
+    map.on('tilepreloaderror', function (event) { showTileError(event, true); });
+    map.on('tileload', function (event) {
+      if (activeRasterSource !== 'karte-bayern' || !event || !event.url) return;
+      var version = aerialAttributionVersion;
+      // The image element cannot expose HTTP provenance headers. A bounded
+      // HEAD request for each loaded tile picks up processing credits that
+      // are more specific than the runtime source catalog.
+      fetch(event.url, { method: 'HEAD', cache: 'no-store' }).then(function (response) {
+        if (version !== aerialAttributionVersion || !response.ok) return;
+        var credit = response.headers.get('X-KB-Imagery-Attribution');
+        if (credit && !aerialTileCredits[credit]) {
+          aerialTileCredits[credit] = true;
+          renderAttribution();
+        }
+      }).catch(function () {});
+    });
+
+    preloadButton.onclick = function () {
+      setNavigationPreload(!navigationPreloadEnabled);
+      updateHash();
+    };
+
+    rotateLeftButton.onclick = function () { map.setBearing(map.getBearing() - 15); };
+    rotateRightButton.onclick = function () { map.setBearing(map.getBearing() + 15); };
+    pitchDownButton.onclick = function () { map.setPitch(map.getPitch() - 10); };
+    pitchUpButton.onclick = function () { map.setPitch(map.getPitch() + 10); };
+    locateButton.onclick = showCurrentLocation;
+
+    // Add-ons: camera animations, MapLibre-style controls, markers and
+    // popups on the same core map.
+    var ui = window.microMapUI;
+    var mapView = microMapCompose(map, { camera: true });
+    mapView.addControl(new ui.NavigationControl({ showCompass: true, visualizePitch: true }), 'top-right');
+    mapView.addControl(new ui.ScaleControl({ maxWidth: 120 }), 'bottom-left');
+
+    var places = [
+      { name: 'Dingolfing', center: start, zoom: 13, text: 'Start of this demo, on the Isar.' },
+      { name: 'Landau', center: [12.692, 48.673], zoom: 14, text: 'Landau an der Isar, old town on the terrace above the river.' },
+      { name: 'Landshut', center: [12.1517, 48.5369], zoom: 14, text: 'Landshut with the Trausnitz castle above the old town.' },
+      { name: 'Regensburg', center: [12.0977, 49.0195], zoom: 14, bearing: -15, text: 'Regensburg: cathedral and Stone Bridge over the Danube.' },
+      { name: 'München', center: [11.5755, 48.1374], zoom: 14, text: 'München, Marienplatz.' },
+      { name: 'Bayern', center: [11.4, 48.95], zoom: 7 }
+    ];
+    var placeList = document.querySelector('#places');
+    places.forEach(function (place) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = place.name;
+      button.onclick = function () {
+        // On wide screens the panel covers the left side: aim at the centre
+        // of the free area to its right instead of the screen centre.
+        var panel = document.querySelector('.panel').getBoundingClientRect();
+        var shift = innerWidth > 640 ? panel.right / 2 : 0;
+        var bearing = (place.bearing || 0) * Math.PI / 180;
+        var degrees = shift * 360 / (256 * Math.pow(2, place.zoom));
+        var center = [place.center[0] - degrees * Math.cos(bearing), place.center[1] + degrees * Math.sin(bearing) * Math.cos(place.center[1] * Math.PI / 180)];
+        mapView.flyTo({ center: center, zoom: place.zoom, bearing: place.bearing || 0, pitch: 0 });
+        if (place.marker) {
+          map.once('moveend', function () {
+            if (!place.marker.getPopup().isOpen()) place.marker.togglePopup();
+          });
+        }
+      };
+      placeList.appendChild(button);
+      if (!place.text) return;
+      var content = document.createElement('div');
+      var title = document.createElement('strong');
+      title.textContent = place.name;
+      content.append(title, place.text);
+      place.marker = new ui.Marker({ color: '#1769e0' })
+        .setLngLat(place.center)
+        .setPopup(new ui.Popup({ offset: 14, maxWidth: '220px' }).setDOMContent(content))
+        .addTo(mapView);
+    });
+    document.querySelector('#actions').onclick = function () {
+      var point = map.project(map.getCenter());
+      map.openMenu(point, menuItems({ point: point, lonLat: map.getCenter() }));
+    };
+    setNavigationPreload(initialView.preload);
+    updateView();
+  </script>
+</body>
+</html>

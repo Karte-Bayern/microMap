@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>microMap.js · Weighted heatmap</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.45 system-ui, sans-serif; color: #16252b; }
+    #map { background: repeating-linear-gradient(0deg, transparent 0 63px, #9fb8b62d 63px 64px), repeating-linear-gradient(90deg, #edf5f0 0 63px, #dfece8 63px 64px); }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(340px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: 16px; border: 1px solid #b7c9c8; border-radius: 12px; background: #fffffff0; box-shadow: 0 8px 28px #0002; }
+    h1 { margin: 0 0 6px; font-size: 19px; }
+    p { margin: 0 0 12px; color: #42575c; }
+    label { display: flex; justify-content: space-between; gap: 8px; margin: 12px 0 4px; font-weight: 600; }
+    input[type="range"] { width: 100%; accent-color: #2563eb; }
+    .legend { height: 14px; margin-top: 14px; border-radius: 20px; background: linear-gradient(90deg, #2563eb, #06b6d4, #84cc16, #facc15, #ef4444); }
+    .legend-label { display: flex; justify-content: space-between; color: #506267; font-size: 11px; }
+    small { display: block; margin-top: 13px; color: #52686d; }
+    @media (prefers-color-scheme: dark) { body { color: #e8f2f3; } #map { background: repeating-linear-gradient(0deg, transparent 0 63px, #82999c22 63px 64px), repeating-linear-gradient(90deg, #1b2e36 0 63px, #243944 63px 64px); } .panel { background: #14252cf0; border-color: #47616b; } p, small, .legend-label { color: #b3c9cc; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel">
+    <h1>Weighted heatmap</h1>
+    <p>Explore 2,000 locally generated events. Every point has a weight and a month; no tiles or data leave this page.</p>
+    <label for="month">Months included <output id="month-value">12</output></label>
+    <input id="month" type="range" min="1" max="12" value="12">
+    <label for="radius">Radius <output id="radius-value">30 px</output></label>
+    <input id="radius" type="range" min="10" max="80" value="30">
+    <label for="intensity">Intensity <output id="intensity-value">0.16</output></label>
+    <input id="intensity" type="range" min="2" max="40" value="16">
+    <div class="legend" aria-hidden="true"></div><div class="legend-label"><span>Lower density</span><span>Higher density</span></div>
+    <small>Pan, zoom and rotate the map. This module uses Canvas aggregation and is independent of any MapLibre style or application schema.</small>
+  </section>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.heatmap.min.js"></script>
+  <script>
+    (function () {
+      var map = microMap('#map', { tiles: false, center: [11.576, 48.137], zoom: 11 });
+      var seed = 17;
+      function random() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+      var hotspots = [[11.54, 48.12], [11.60, 48.15], [11.58, 48.11], [11.63, 48.13]];
+      var features = [];
+      for (var i = 0; i < 2000; i++) {
+        var anchor = hotspots[i % hotspots.length];
+        var x = (random() + random() + random() - 1.5) * .055;
+        var y = (random() + random() + random() - 1.5) * .04;
+        features.push({ type: 'Feature', id: i, properties: { weight: .4 + random() * 1.7, time: Date.UTC(2025, Math.floor(random() * 12), 1) }, geometry: { type: 'Point', coordinates: [anchor[0] + x, anchor[1] + y] } });
+      }
+      var heat = microMap.heatmap(map, { data: { type: 'FeatureCollection', features: features } });
+      var month = document.getElementById('month');
+      var radius = document.getElementById('radius');
+      var intensity = document.getElementById('intensity');
+      month.addEventListener('input', function () {
+        document.getElementById('month-value').textContent = month.value;
+        heat.setTimeRange([Date.UTC(2025, 0, 1), Date.UTC(2025, +month.value, 1) - 1]);
+      });
+      radius.addEventListener('input', function () {
+        document.getElementById('radius-value').textContent = radius.value + ' px';
+        heat.setPaint({ radius: +radius.value });
+      });
+      intensity.addEventListener('input', function () {
+        document.getElementById('intensity-value').textContent = (+intensity.value / 100).toFixed(2);
+        heat.setPaint({ intensity: +intensity.value / 100 });
+      });
+    }());
+  </script>
+</body>
+</html>

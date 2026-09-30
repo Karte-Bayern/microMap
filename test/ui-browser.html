@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MicroMap UI smoke</title>
+  <style>
+    body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
+    #map { position: absolute; inset: 0; background: #eef1e6; }
+    .stop { width: 26px; height: 26px; border-radius: 50%; background: #1769e0; color: #fff; border: 2px solid #fff; font: bold 12px/22px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); cursor: pointer; }
+    #log { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 10; background: rgba(255,255,255,.9); padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <pre id="log">loading…</pre>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.camera.min.js"></script>
+  <script src="../lib/microMap.compose.min.js"></script>
+  <script src="../lib/microMap.ui.min.js"></script>
+  <script>
+    // Network-free smoke for microMap.ui: markers (default pin, custom
+    // element, draggable, Leaflet icon), popups, a tooltip, all four
+    // controls and compose layer events on a stand-in layer.
+    var log = document.getElementById('log');
+    var results = [];
+    function note(value) { results.push(value); log.textContent = results.join('\n'); }
+    var base = microMap('#map', { tiles: false, center: [11.575, 48.137], zoom: 13, tileSize: 512, maxZoom: 18 });
+    var map = microMapCompose(base, { camera: true });
+    var ui = microMapUI;
+    var pin = new ui.Marker({ color: '#dc2626' }).setLngLat([11.575, 48.137])
+      .setPopup(new ui.Popup({ offset: 12, maxWidth: '220px' }).setHTML('<strong>Marienplatz</strong><br>MapLibre-style popup'))
+      .addTo(map);
+    var stopElement = document.createElement('div');
+    stopElement.className = 'stop';
+    stopElement.textContent = '3';
+    new ui.Marker({ element: stopElement }).setLngLat([11.585, 48.14]).addTo(map);
+    var dragged = new ui.Marker({ color: '#2e7d32', draggable: true }).setLngLat([11.56, 48.13]).addTo(map);
+    dragged.on('dragend', function () { var p = dragged.getLngLat(); note('dragend ' + p.lng.toFixed(4) + ',' + p.lat.toFixed(4)); });
+    ui.marker([48.132, 11.59]).bindPopup('Leaflet <em>bindPopup</em>').bindTooltip('Tooltip', { direction: 'top' }).addTo(map);
+    map.addControl(new ui.NavigationControl({ showCompass: true }));
+    map.addControl(new ui.GeolocateControl(), 'top-right');
+    map.addControl(new ui.ScaleControl({ maxWidth: 120 }), 'bottom-left');
+    map.addControl(new ui.AttributionControl({ compact: false, customAttribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>' }));
+    note('markers ' + document.querySelectorAll('.micromap-marker').length + ', controls ' + document.querySelectorAll('.micromap-ctrl').length);
+    pin.togglePopup();
+    note('popup open ' + pin.getPopup().isOpen());
+    window.smoke = { base: base, map: map, pin: pin, dragged: dragged, results: results };
+  </script>
+</body>
+</html>

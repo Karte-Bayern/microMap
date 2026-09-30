@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>microMap.js · Measurements</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.45 system-ui, sans-serif; color: #19303a; }
+    #map { background: #eaf2ed; }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid #b9cdca; border-radius: 12px; background: #fffffff0; box-shadow: 0 8px 28px #0002; }
+    h1 { margin: 0 0 5px; font-size: 20px; }
+    p { margin: 0 0 12px; color: #496069; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+    button { min-height: 36px; padding: 6px 10px; border: 1px solid #9bb6b6; border-radius: 7px; background: #fff; color: inherit; cursor: pointer; font: inherit; }
+    button[aria-pressed="true"] { background: #1769e0; color: #fff; border-color: #1769e0; }
+    button:hover { border-color: #1769e0; }
+    :focus-visible { outline: 3px solid #1769e0; outline-offset: 2px; }
+    #results { margin: 12px 0 0; padding-left: 22px; }
+    #results li { margin: 4px 0; }
+    small { color: #496069; }
+    output { display: block; min-height: 20px; color: #1769e0; }
+    @media (prefers-color-scheme: dark) { body { color: #e8f3f4; } #map { background: #1a3038; } .panel { background: #15262fee; border-color: #4d6770; } p, small { color: #b7cbd0; } button { background: #233b45; color: #e8f3f4; border-color: #5c7881; } output { color: #91c2ff; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel">
+    <h1>Measure on the map</h1>
+    <p>All calculations and the example road graph run in this page. No tiles or routing requests are made.</p>
+    <div class="row" id="tools">
+      <button type="button" data-tool="line" aria-pressed="false">Air distance</button>
+      <button type="button" data-tool="circle" aria-pressed="false">Circle</button>
+      <button type="button" data-tool="polygon" aria-pressed="false">Polygon</button>
+      <button type="button" data-tool="route" aria-pressed="false">Shortest route</button>
+    </div>
+    <div class="row"><button type="button" id="finish">Finish polygon</button><button type="button" id="cancel">Cancel</button><button type="button" id="clear">Clear</button></div>
+    <small>Click two points for air distance, a circle or a route. Click at least three points and then Finish for a polygon. Gray lines are a synthetic road graph; blue routes find the shortest connected path in that graph.</small>
+    <output id="status" aria-live="polite"></output>
+    <ol id="results"></ol>
+  </section>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.measure.min.js"></script>
+  <script>
+    (function () {
+      var map = microMap('#map', { tiles: false, center: [11.576, 48.137], zoom: 12 });
+      var overlay = microMap.geojson(map);
+      var status = document.getElementById('status');
+      var roadFeatures = [];
+      var nodes = [], edges = [];
+      var size = 8;
+      function node(x, y) { return y * size + x; }
+      for (var y = 0; y < size; y++) for (var x = 0; x < size; x++) {
+        nodes.push([11.533 + x * .012, 48.105 + y * .009]);
+        edges.push([]);
+      }
+      function connect(a, b) {
+        var meters = map.distanceTo(nodes[a], nodes[b]);
+        edges[a].push({ to: b, cost: meters });
+        edges[b].push({ to: a, cost: meters });
+        roadFeatures.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [nodes[a], nodes[b]] } });
+      }
+      for (y = 0; y < size; y++) for (x = 0; x < size; x++) {
+        if (x + 1 < size && !(x === 3 && y !== 2 && y !== 6)) connect(node(x, y), node(x + 1, y));
+        if (y + 1 < size) connect(node(x, y), node(x, y + 1));
+      }
+      overlay.addSource('example-roads', { type: 'geojson', data: { type: 'FeatureCollection', features: roadFeatures } });
+      overlay.addLayer({ id: 'example-road-lines', type: 'line', source: 'example-roads', paint: { 'line-color': '#789297', 'line-width': 2 } });
+      var measure = microMap.measure(map, {
+        overlay: overlay,
+        graph: { nodes: nodes, edges: edges },
+        onError: function (error) { status.textContent = error.message; },
+        onChange: function (items) {
+          var list = document.getElementById('results');
+          list.replaceChildren();
+          items.forEach(function (item) {
+            var element = document.createElement('li');
+            element.textContent = item.type + ': ' + item.label + (item.areaM2 != null ? ' · area ' + (item.areaM2 / 1000000).toFixed(3) + ' km²' : '');
+            list.appendChild(element);
+          });
+          status.textContent = items.length + ' measurements';
+        }
+      });
+      document.getElementById('tools').addEventListener('click', function (event) {
+        var selected = event.target && event.target.dataset.tool;
+        if (!selected) return;
+        measure.setTool(measure.getTool() === selected ? null : selected);
+        document.querySelectorAll('[data-tool]').forEach(function (button) { button.setAttribute('aria-pressed', button.dataset.tool === measure.getTool() ? 'true' : 'false'); });
+        status.textContent = measure.getTool() ? 'Click the map to start ' + measure.getTool() + '.' : 'Measurement tool off.';
+      });
+      document.getElementById('finish').addEventListener('click', function () { if (!measure.finish()) status.textContent = 'Add three polygon points first.'; });
+      document.getElementById('cancel').addEventListener('click', function () { measure.cancel(); status.textContent = 'Draft canceled.'; });
+      document.getElementById('clear').addEventListener('click', function () { measure.clear(); status.textContent = 'Measurements cleared.'; });
+    }());
+  </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>microMap add-on browser smoke</title>
+<style>
+  body { margin: 0; font: 14px system-ui, sans-serif; }
+  #map { position: relative; width: 512px; height: 320px; background: #eef3f6; }
+  #status { white-space: pre-wrap; padding: 8px; }
+  button { margin: 8px; }
+</style>
+<div id="map" aria-label="microMap P1 add-on smoke map"></div>
+<button id="run" type="button">Run add-on smoke</button>
+<output id="status" aria-live="polite">ready</output>
+<script src="../lib/microMap.min.js"></script>
+<script src="../lib/microMap.geojson.min.js"></script>
+<script src="../lib/microMap.camera.min.js"></script>
+<script src="../lib/microMap.compose.min.js"></script>
+<script src="../lib/microMap.raster.min.js"></script>
+<script>
+  (function () {
+    var status = document.getElementById('status');
+    var image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    var map = microMap(document.getElementById('map'), { tiles: false, center: [12.5, 48.6], zoom: 7, zoomAnimation: false });
+    var composed = microMap.compose(map, { geojson: true, camera: true });
+    composed.addSource('points', { type: 'geojson', data: { type: 'Feature', id: 'smoke-point', properties: { label: 'P1' }, geometry: { type: 'Point', coordinates: [12.5, 48.6] } } });
+    composed.addLayer({ id: 'point', type: 'circle', source: 'points', paint: { 'circle-color': '#d8432e', 'circle-radius': 8 } });
+    var raster = microMap.raster(map, { maxTiles: 8 });
+    var tiles = 0;
+    raster.on('tileload', function () { tiles++; });
+    raster.addSource('fixture', { type: 'raster', tiles: function () { return image; }, maxzoom: 7 });
+    raster.addLayer({ id: 'fixture-layer', type: 'raster', source: 'fixture', paint: { 'raster-opacity': .12 } });
+    document.getElementById('run').addEventListener('click', function () {
+      composed.jumpTo({ center: [12.5, 48.6], zoom: 7 });
+      var hit = composed.queryRenderedFeatures(map.project([12.5, 48.6]), { layers: ['point'], radius: 2 });
+      var bounds = composed.getOverlayBounds('points');
+      composed.easeTo({ center: [12.51, 48.61], duration: 20 });
+      setTimeout(function () {
+        status.textContent = 'query=' + (hit[0] && hit[0].id) + '\nbounds=' + bounds.join(',') + '\ntiles=' + tiles + '\ncamera=' + map.getCenter().map(function (value) { return value.toFixed(3); }).join(',');
+      }, 80);
+    });
+  })();
+</script>

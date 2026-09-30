@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Network-free microMap field annotations: points, lines and areas with GeoJSON exchange.">
+  <title>microMap.js · Field annotations</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.45 system-ui, sans-serif; color: #1c2933; }
+    #map { background: repeating-linear-gradient(0deg, transparent 0 63px, #8399a125 63px 64px), repeating-linear-gradient(90deg, #e8f0ec 0 63px, #d8e5e1 63px 64px); }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(355px, calc(100vw - 24px)); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid #bac8cc; border-radius: 12px; background: #fffc; box-shadow: 0 7px 25px #0002; backdrop-filter: blur(10px); }
+    h1 { margin: 0 0 6px; font-size: 18px; }
+    p { margin: 0 0 12px; color: #4d5c64; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    button, label.file { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 5px 10px; border: 1px solid #9aadb4; border-radius: 7px; background: #fff; color: #1c2933; cursor: pointer; font: inherit; }
+    button[aria-pressed="true"] { background: #1769e0; border-color: #1769e0; color: white; }
+    button:hover, label.file:hover { border-color: #1769e0; }
+    button:disabled { opacity: .5; cursor: default; }
+    :focus-visible { outline: 3px solid #1769e0; outline-offset: 2px; }
+    label.text { display: block; margin: 10px 0 3px; font-weight: 600; }
+    input[type="text"] { width: 100%; padding: 7px 9px; border: 1px solid #9aadb4; border-radius: 7px; font: inherit; }
+    input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    output { display: block; min-height: 2em; margin-top: 9px; color: #365166; }
+    small { display: block; color: #536570; }
+    @media (prefers-color-scheme: dark) {
+      body { color: #e5eef0; }
+      #map { background: repeating-linear-gradient(0deg, transparent 0 63px, #82999c22 63px 64px), repeating-linear-gradient(90deg, #1b2e36 0 63px, #243944 63px 64px); }
+      .panel { background: #14212eea; border-color: #3e5662; }
+      p, small { color: #b1c4cd; }
+      button, label.file, input[type="text"] { background: #1c303b; border-color: #536f7d; color: #e5eef0; }
+      output { color: #9ac7ff; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel" aria-label="Field annotation controls">
+    <h1>Field annotations</h1>
+    <p>Try points, routes and areas on a local map. The example makes no tile requests.</p>
+    <label class="text" for="label">Label for next or selected annotation</label>
+    <input id="label" type="text" maxlength="80" value="Meeting point">
+    <label class="text" for="search">Find an annotation</label>
+    <input id="search" type="text" placeholder="Name or kind">
+    <div class="row"><button type="button" id="find">Find</button></div>
+    <div class="row" id="tools">
+      <button type="button" data-tool="point" aria-pressed="false">Point</button>
+      <button type="button" data-tool="line" aria-pressed="false">Line</button>
+      <button type="button" data-tool="area" aria-pressed="false">Area</button>
+    </div>
+    <div class="row">
+      <button type="button" id="finish">Finish</button>
+      <button type="button" id="undo">Undo vertex</button>
+      <button type="button" id="cancel">Cancel</button>
+    </div>
+    <div class="row">
+      <button type="button" id="undo-change">Undo change</button>
+      <button type="button" id="redo-change">Redo change</button>
+      <button type="button" id="rename">Rename selected</button>
+      <button type="button" id="move-selected">Move selected point</button>
+      <button type="button" id="delete">Delete selected</button>
+    </div>
+    <div class="row">
+      <button type="button" id="export">Export GeoJSON</button>
+      <button type="button" id="export-log">Export edit log</button>
+      <button type="button" id="export-png">Save PNG</button>
+      <button type="button" id="print-map">Print map</button>
+      <label class="file" for="import">Import GeoJSON</label><input id="import" type="file" accept=".geojson,.json,application/geo+json,application/json">
+      <button type="button" id="clear">Clear</button>
+    </div>
+    <small>Click the map to draw, or turn the tool off and click an annotation to select it. Finish a line with 2 points or an area with 3. Enter finishes; Escape cancels. Ctrl/Cmd+Z undoes a committed change. Import checks geometry before loading; export and import stay in this browser.</small>
+    <output id="status" aria-live="polite"></output>
+  </section>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.field.min.js"></script>
+  <script src="../lib/microMap.inspect.min.js"></script>
+  <script src="../lib/microMap.export.min.js"></script>
+  <script>
+    (function () {
+      var map = microMap('#map', { tiles: false, center: [11.576, 48.137], zoom: 12, ariaLabel: 'Field annotation map' });
+      var status = document.getElementById('status');
+      var label = document.getElementById('label');
+      var selectedId = null;
+      var movingSelected = false;
+      function refreshActions(value) {
+        var selectedFeature = value.features.find(function (feature) { return feature.id === selectedId; });
+        if (selectedId != null && !selectedFeature) { selectedId = null; movingSelected = false; }
+        document.getElementById('undo-change').disabled = !field.canUndo();
+        document.getElementById('redo-change').disabled = !field.canRedo();
+        document.getElementById('rename').disabled = selectedId == null;
+        document.getElementById('move-selected').disabled = !selectedFeature || !selectedFeature.geometry || selectedFeature.geometry.type !== 'Point';
+        document.getElementById('delete').disabled = selectedId == null;
+      }
+      var field = microMap.field(map, { historyLimit: 20, onChange: function (value) {
+        status.textContent = value.features.length + ' annotations on this map';
+        refreshActions(value);
+      } });
+      field.addPoint([11.576, 48.137], { label: 'Meeting point', color: '#cf3e36', kind: 'location' });
+      field.addLine([[11.568, 48.134], [11.575, 48.137], [11.583, 48.141]], { label: 'Walking route', color: '#1769e0', kind: 'route' });
+      document.getElementById('find').addEventListener('click', function () {
+        var matches = microMap.search(field.getData(), document.getElementById('search').value, { keys: ['label', 'kind'], limit: 1 });
+        var feature = matches[0];
+        if (!feature) { status.textContent = 'No matching annotation.'; return; }
+        selectedId = feature.id;
+        label.value = feature.properties.label || '';
+        if (feature.geometry && feature.geometry.type === 'Point') map.setCenter(feature.geometry.coordinates);
+        refreshActions(field.getData());
+        status.textContent = 'Found: ' + (feature.properties.label || feature.id);
+      });
+
+      function selected(tool) {
+        Array.prototype.forEach.call(document.querySelectorAll('[data-tool]'), function (button) {
+          button.setAttribute('aria-pressed', button.dataset.tool === tool ? 'true' : 'false');
+        });
+      }
+      document.getElementById('tools').addEventListener('click', function (event) {
+        var tool = event.target && event.target.dataset.tool;
+        if (!tool) return;
+        field.setTool(tool === field.getTool() ? null : tool, { label: label.value.trim(), color: '#1769e0' });
+        selectedId = null;
+        movingSelected = false;
+        refreshActions(field.getData());
+        selected(field.getTool());
+        status.textContent = field.getTool() ? 'Click the map to add ' + field.getTool() + ' vertices.' : 'Drawing stopped.';
+      });
+      document.getElementById('finish').addEventListener('click', function () {
+        if (!field.finish()) status.textContent = 'Add more vertices first.';
+      });
+      document.getElementById('undo').addEventListener('click', function () { field.undoVertex(); });
+      document.getElementById('undo-change').addEventListener('click', function () { field.undo(); });
+      document.getElementById('redo-change').addEventListener('click', function () { field.redo(); });
+      document.getElementById('rename').addEventListener('click', function () {
+        if (selectedId != null) field.update(selectedId, { properties: { label: label.value.trim() } });
+      });
+      document.getElementById('move-selected').addEventListener('click', function () {
+        if (selectedId == null) return;
+        movingSelected = true;
+        status.textContent = 'Click the new location for the selected point.';
+      });
+      document.getElementById('delete').addEventListener('click', function () {
+        if (selectedId != null) field.remove(selectedId);
+      });
+      document.getElementById('cancel').addEventListener('click', function () { movingSelected = false; field.cancel(); status.textContent = 'Draft or move canceled.'; });
+      document.getElementById('clear').addEventListener('click', function () { field.clear(); status.textContent = 'Annotations cleared.'; });
+      document.addEventListener('keydown', function (event) {
+        if (event.target === label) return;
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+          event.preventDefault();
+          if (event.shiftKey) field.redo(); else field.undo();
+          return;
+        }
+        if (event.key === 'Enter') field.finish();
+        if (event.key === 'Escape') { movingSelected = false; field.cancel(); }
+      });
+      function downloadJSON(value, filename, mime) {
+        var blob = new Blob([JSON.stringify(value, null, 2)], { type: mime });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      }
+      document.getElementById('export').addEventListener('click', function () {
+        downloadJSON(field.getData(), 'field-annotations.geojson', 'application/geo+json');
+      });
+      document.getElementById('export-log').addEventListener('click', function () {
+        downloadJSON(field.getEditLog(), 'field-edits.json', 'application/json');
+      });
+      document.getElementById('export-png').addEventListener('click', function () {
+        microMap.export.download(map, { filename: 'field-map.png', background: '#e8f0ec' }).catch(function (error) { status.textContent = error.message; });
+      });
+      document.getElementById('print-map').addEventListener('click', function () {
+        microMap.export.print(map, { background: '#e8f0ec' }).catch(function (error) { status.textContent = error.message; });
+      });
+      document.getElementById('import').addEventListener('change', async function (event) {
+        var file = event.target.files[0];
+        if (!file) return;
+        try {
+          var input = JSON.parse(await file.text());
+          var report = microMap.inspect(input);
+          var problem = report.issues.find(function (issue) { return issue.severity === 'error'; });
+          if (problem) throw new Error((problem.featureIndex < 0 ? '' : 'Feature ' + (problem.featureIndex + 1) + ', ') + problem.path + ': ' + problem.message);
+          field.setData(input);
+          status.textContent = 'Imported ' + field.getData().features.length + ' annotations.' + (report.issues.length ? ' Check ' + report.issues.length + ' coordinate warning(s).' : '');
+        }
+        catch (error) { status.textContent = 'Import failed: ' + error.message; }
+        event.target.value = '';
+      });
+      map.on('click', function (event) {
+        if (field.getTool()) return;
+        if (movingSelected && selectedId != null) {
+          movingSelected = false;
+          field.update(selectedId, { geometry: { type: 'Point', coordinates: event.lonLat } });
+          status.textContent = 'Point moved. Undo change restores its previous location.';
+          return;
+        }
+        var feature = field.queryRenderedFeatures(event.point)[0];
+        selectedId = feature ? feature.id : null;
+        if (feature) {
+          label.value = feature.properties.label || '';
+          status.textContent = 'Selected: ' + (feature.properties.label || (feature.geometry && feature.geometry.type) || 'annotation');
+        }
+        refreshActions(field.getData());
+      });
+    }());
+  </script>
+</body>
+</html>

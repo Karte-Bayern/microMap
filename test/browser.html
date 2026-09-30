@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>microMap.js browser smoke test</title>
+<div id="map" style="width:640px;height:480px"></div>
+<pre id="result">RUNNING</pre>
+<script src="../lib/microMap.min.js"></script>
+<script>
+  var errors = [];
+  function check(value, message) { if (!value) errors.push(message); }
+  var map = microMap('#map', {
+    center: [12.491, 48.63],
+    zoom: 6,
+    tiles: function (z, x, y) {
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">' +
+        '<rect width="256" height="256" fill="#e9eef1"/><path d="M0 0L256 256M256 0L0 256" stroke="#9aa"/>' +
+        '<text x="12" y="28" font-family="sans-serif" font-size="18">' + z + '/' + x + '/' + y + '</text></svg>';
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    }
+  });
+  var point = map.project([12.491, 48.63]);
+  check(Math.abs(point[0] - 320) < .001, 'center x projection');
+  check(Math.abs(point[1] - 240) < .001, 'center y projection');
+  var before = map.unproject([100, 100]);
+  map.setZoom(9, [100, 100]);
+  var after = map.unproject([100, 100]);
+  check(Math.abs(before[0] - after[0]) < 1e-7, 'anchored longitude');
+  check(Math.abs(before[1] - after[1]) < 1e-7, 'anchored latitude');
+  requestAnimationFrame(function () {
+    check(document.querySelectorAll('#map img').length > 0, 'tiles rendered');
+    document.querySelector('#result').textContent = errors.length ? 'FAIL: ' + errors.join(', ') : 'PASS';
+    document.title = errors.length ? 'FAIL' : 'PASS';
+  });
+</script>

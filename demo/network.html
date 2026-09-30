@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A network-free weighted routing and reachability demo with modes and road closures.">
+  <title>microMap.js · Network routing</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.45 system-ui, sans-serif; color: #17272d; }
+    #map { background: repeating-linear-gradient(0deg, transparent 0 58px, #83999b22 58px 60px), repeating-linear-gradient(90deg, #e9f0ec 0 58px, #d9e4df 58px 60px); }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: 16px; border: 1px solid #bdccca; border-radius: 12px; background: #fffffff2; box-shadow: 0 8px 28px #0002; }
+    h1 { margin: 0 0 5px; font-size: 19px; } p { margin: 0 0 13px; color: #53666b; }
+    .row { display: flex; align-items: center; gap: 8px; margin: 9px 0; }
+    .row label { flex: 1; font-weight: 600; } select, button { min-height: 38px; padding: 6px 10px; border: 1px solid #aabbbd; border-radius: 7px; background: white; color: inherit; font: inherit; }
+    button { width: 100%; cursor: pointer; } button:hover { background: #edf4f6; }
+    input[type=range] { width: 100%; accent-color: #1769e0; }
+    output, #status { display: block; padding: 9px; border-radius: 7px; background: #edf3f3; color: #334b54; font: 12px/1.45 ui-monospace,monospace; white-space: pre-line; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; color: #566c70; font-size: 12px; }
+    .legend span::before { content: ''; display: inline-block; width: 12px; height: 4px; margin-right: 5px; vertical-align: middle; background: var(--c); }
+    small { display: block; margin-top: 12px; color: #687c81; font-size: 11px; }
+    @media (max-width: 520px) { .panel { top: auto; bottom: 10px; max-height: 62vh; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel" aria-label="Network routing controls">
+    <h1>Routing &amp; reachability</h1>
+    <p>Compute a weighted route on an application-owned graph. Switch travel mode, close the bridge and inspect the reachable area from the station.</p>
+    <div class="row"><label for="mode">Travel mode</label><select id="mode"><option value="fire">Response vehicle</option><option value="foot">On foot</option></select></div>
+    <div class="row"><label for="budget">Reachability budget</label><output id="budget-label">240 s</output></div>
+    <input id="budget" type="range" min="60" max="420" step="15" value="240" aria-label="Reachability time budget">
+    <div class="row"><button id="bridge" type="button">Close bridge</button></div>
+    <output id="status" aria-live="polite">Calculating route…</output>
+    <div class="legend"><span style="--c:#a7b6b8">Road graph</span><span style="--c:#e58a21">Reachable</span><span style="--c:#1769e0">Best route</span><span style="--c:#df5146">Closed</span></div>
+    <small>The graph can represent streets, corridors, pipes, trails or any weighted network. Costs, access modes and closures are supplied by the host application.</small>
+  </section>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.network.min.js"></script>
+  <script>
+    (function () {
+      var center = [11.577, 48.139];
+      var map = microMap('#map', { tiles: false, center: center, zoom: 12.7, maxZoom: 18, ariaLabel: 'Weighted network route map' });
+      var overlay = microMap.geojson(map);
+      var nodes = [];
+      for (var row = 0; row < 4; row++) for (var column = 0; column < 5; column++) {
+        nodes.push({ id: 'r' + row + 'c' + column, coordinates: [center[0] + (column - 2) * .012, center[1] + (1.5 - row) * .006] });
+      }
+      var edges = [];
+      var sequence = 0;
+      function addEdge(from, to, properties) {
+        var a = nodes.find(function (node) { return node.id === from; });
+        var b = nodes.find(function (node) { return node.id === to; });
+        var meters = Math.hypot((b.coordinates[0] - a.coordinates[0]) * 111000 * Math.cos(center[1] * Math.PI / 180), (b.coordinates[1] - a.coordinates[1]) * 111000);
+        var edge = { id: properties.id || 'street-' + sequence++, from: from, to: to, distance: meters, time: meters / (properties.speedKph / 3.6), speedKph: properties.speedKph, modes: properties.modes || ['fire', 'foot'], properties: properties };
+        if (properties.closed) edge.closed = true;
+        edges.push(edge);
+      }
+      for (row = 0; row < 4; row++) for (column = 0; column < 5; column++) {
+        var current = 'r' + row + 'c' + column;
+        if (column < 4) {
+          var bridge = row === 1 && column === 2;
+          addEdge(current, 'r' + row + 'c' + (column + 1), { id: bridge ? 'river-bridge' : null, label: bridge ? 'Bridge' : 'Street', speedKph: bridge ? 65 : 35, color: bridge ? '#7197a3' : '#a7b6b8', closed: false });
+        }
+        if (row < 3) {
+          var footpath = column === 2 && row === 2;
+          addEdge(current, 'r' + (row + 1) + 'c' + column, { label: footpath ? 'Footpath' : 'Street', speedKph: footpath ? 5 : 28, modes: footpath ? ['foot'] : ['fire', 'foot'], color: footpath ? '#9b83bd' : '#a7b6b8' });
+        }
+      }
+      var graph = microMap.network({ nodes: nodes, edges: edges });
+      var sourceData = { type: 'FeatureCollection', features: [] };
+      overlay.addSource('network', { type: 'geojson', data: sourceData });
+      overlay.addLayer({ id: 'streets', type: 'line', source: 'network', filter: ['==', ['get', 'kind'], 'street'], paint: { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': .9 } });
+      overlay.addLayer({ id: 'reach-lines', type: 'line', source: 'network', filter: ['==', ['get', 'kind'], 'reachable-edge'], paint: { 'line-color': '#e58a21', 'line-width': 5, 'line-opacity': .65 } });
+      overlay.addLayer({ id: 'best-route', type: 'line', source: 'network', filter: ['==', ['get', 'kind'], 'route'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#1769e0', 'line-width': 7 } });
+      overlay.addLayer({ id: 'nodes', type: 'circle', source: 'network', filter: ['==', ['get', 'kind'], 'node'], paint: { 'circle-color': ['get', 'color'], 'circle-radius': ['get', 'radius'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 } });
+      overlay.addLayer({ id: 'labels', type: 'symbol', source: 'network', filter: ['==', ['get', 'kind'], 'node'], layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-offset': [0, -1.6] }, paint: { 'text-color': '#243941', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
+
+      var start = 'r1c0';
+      var finish = 'r1c4';
+      var closed = false;
+      var mode = document.getElementById('mode');
+      var budget = document.getElementById('budget');
+      var budgetLabel = document.getElementById('budget-label');
+      var status = document.getElementById('status');
+      function render() {
+        var travelMode = mode.value;
+        var maxCost = +budget.value;
+        budgetLabel.textContent = maxCost + ' s';
+        var route = graph.route(start, finish, { cost: 'time', mode: travelMode });
+        var reachable = graph.reachable(start, { cost: 'time', mode: travelMode, maxCost: maxCost });
+        var reached = Object.create(null);
+        reachable.nodeIds.forEach(function (id) { reached[id] = true; });
+        var features = graph.getGraph().edges.map(function (edge) {
+          return { type: 'Feature', id: 'road-' + edge.id, properties: { kind: 'street', color: edge.closed ? '#df5146' : edge.properties.color, label: edge.properties.label }, geometry: { type: 'LineString', coordinates: edge.coordinates } };
+        });
+        reachable.features.forEach(function (feature, index) { feature.id = 'reach-' + index; features.push(feature); });
+        if (route) features.push({ type: 'Feature', id: 'chosen-route', properties: { kind: 'route' }, geometry: { type: 'LineString', coordinates: route.coordinates } });
+        graph.getGraph().nodes.forEach(function (node) {
+          var endpoint = node.id === start || node.id === finish;
+          features.push({ type: 'Feature', id: 'node-' + node.id, properties: { kind: 'node', label: node.id === start ? 'Station' : node.id === finish ? 'Site' : '', color: endpoint ? (node.id === start ? '#1769e0' : '#df5146') : reached[node.id] ? '#e58a21' : '#65777d', radius: endpoint ? 8 : reached[node.id] ? 5 : 3 }, geometry: { type: 'Point', coordinates: node.coordinates } });
+        });
+        overlay.getSource('network').setData({ type: 'FeatureCollection', features: features });
+        status.textContent = route
+          ? 'Route: ' + Math.round(route.distance) + ' m · ' + Math.ceil(route.cost) + ' s\nReachable nodes: ' + reachable.nodeIds.length + ' / ' + nodes.length + '\nMode: ' + (travelMode === 'fire' ? 'response vehicle' : 'on foot') + (closed ? '\nBridge: closed · alternate route active' : '\nBridge: open')
+          : 'No route available for this mode.';
+      }
+      document.getElementById('bridge').addEventListener('click', function (event) {
+        closed = !closed;
+        graph.setEdgeState('river-bridge', { closed: closed });
+        event.currentTarget.textContent = closed ? 'Reopen bridge' : 'Close bridge';
+        render();
+      });
+      mode.addEventListener('change', render);
+      budget.addEventListener('input', render);
+      render();
+    }());
+  </script>
+</body>
+</html>

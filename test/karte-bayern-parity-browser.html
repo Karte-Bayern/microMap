@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MicroMap Karte.Bayern parity smoke</title>
+<div id="map" style="width:512px;height:384px"></div>
+<pre id="result">RUNNING</pre>
+<script src="../lib/microMap.min.js"></script>
+<script src="../lib/microMap.vector.min.js"></script>
+<script src="../lib/microMap.geojson.min.js"></script>
+<script src="../lib/microMap.camera.min.js"></script>
+<script src="../lib/microMap.compose.min.js"></script>
+<script>
+  (function () {
+    var fixture = 'data:application/vnd.mapbox-vector-tile;base64,' +
+      'GjoKDnRyYW5zcG9ydGF0aW9uEhEIBxICAAAYAiIHCQAACoBAABoFY2xhc3MiCQoHcHJpbWFyeSiAIHgCGjsKCWxhbmRjb3ZlchIYCAcSAgAAGAMiDgkAABqAQAAAgED/PwAPGgVjbGFzcyIICgZmb3Jlc3QogCB4AhosCgVwbGFjZRIPCAcSAgAAGAEiBQmAQIBAGgVjbGFzcyIGCgR0b3duKIAgeAI=';
+    var result = document.getElementById('result');
+    var bytes = Uint8Array.from(atob(fixture.split(',')[1]), function (value) { return value.charCodeAt(0); });
+    function fixtureFetch() {
+      return Promise.resolve({ ok: true, arrayBuffer: function () { return Promise.resolve(bytes.buffer.slice(0)); } });
+    }
+    var errors = [];
+    var events = [];
+    function check(value, message) { if (!value) errors.push(message); }
+    function finish() {
+      if (result.textContent !== 'RUNNING') return;
+      clearTimeout(timeout);
+      result.textContent = errors.length ? 'FAIL: ' + errors.join(', ') : 'PASS';
+      document.title = errors.length ? 'FAIL' : 'PASS';
+      composed.remove();
+    }
+    var timeout = setTimeout(function () { errors.push('tile load timed out'); finish(); }, 4000);
+    var base = microMap('#map', { tiles: false, tileSize: 512, center: [0, 0], zoom: 0, zoomAnimation: false });
+    var style = {
+      version: 8,
+      sources: { base: { type: 'vector', tiles: [fixture] } },
+      layers: [
+        { id: 'land', type: 'fill', source: 'base', 'source-layer': 'landcover', paint: { 'fill-color': '#dfe9d7' } },
+        { id: 'roads', type: 'line', source: 'base', 'source-layer': 'transportation', paint: { 'line-color': '#d75d38', 'line-width': 2 } }
+      ]
+    };
+    var vectors = microMapVector(base, { tiles: fixture, minZoom: 0, maxZoom: 0, tileBuffer: 0, source: 'base', style: style, fetch: fixtureFetch });
+    var composed = microMapCompose(base, { vectors: [vectors], geojson: true });
+    composed.on('style.load', function (event) { events.push(event.type); });
+    composed.on('styledata', function (event) { events.push(event.type); });
+    var rasterLoads = 0;
+    var vectorLoads = 0;
+    function maybeFinish() {
+      if (rasterLoads < 2 || vectorLoads < 1) return;
+      setTimeout(function () {
+        check(events.indexOf('style.load') >= 0, 'style.load event');
+        check(events.indexOf('styledata') >= 0, 'styledata event');
+        check(composed.isStyleLoaded() && composed.loaded(), 'style and map loaded');
+        check(composed.areTilesLoaded(), 'visible tiles loaded');
+        check(composed.getStyle().sources.relief.tiles[0].indexOf('rev=2') >= 0, 'reloaded tile template');
+        var stops = composed.queryRenderedFeatures(base.project([0, 0]), { layers: ['transit-area'] });
+        check(stops.some(function (stop) { return stop.source === 'transit'; }), 'second MVT source is queryable');
+        composed.removeLayer('relief-layer').removeSource('relief');
+        composed.removeLayer('transit-area').removeSource('transit');
+        check(!composed.getSource('relief') && !composed.getSource('transit'), 'sources removed');
+        finish();
+      }, 40);
+    }
+    composed.on('tileload', function (event) {
+      if (event.source === 'transit') { vectorLoads++; maybeFinish(); return; }
+      if (!event.raster || event.source !== 'relief') return;
+      rasterLoads++;
+      if (rasterLoads === 1) {
+        check(composed.getStyle().sources.relief.tiles[0].indexOf('raster-tile.svg') >= 0, 'raster in style snapshot');
+        check(composed.getAttributions().indexOf('Smoke raster') >= 0, 'raster attribution');
+        composed.getSource('relief').setTiles(['raster-tile.svg?z={z}&x={x}&y={y}&rev=2']);
+      } else {
+        maybeFinish();
+      }
+    });
+    composed.addSource('transit', { type: 'vector', tiles: ['fixture/{z}/{x}/{y}.pbf'], attribution: 'Smoke MVT' });
+    composed.addLayer({ id: 'transit-area', type: 'fill', source: 'transit', 'source-layer': 'landcover', paint: { 'fill-color': '#123456', 'fill-opacity': 0.1 } });
+    composed.addSource('relief', { type: 'raster', tiles: ['raster-tile.svg?z={z}&x={x}&y={y}'], tileSize: 512, attribution: 'Smoke raster' });
+    composed.addLayer({ id: 'relief-layer', type: 'raster', source: 'relief', paint: { 'raster-opacity': 0.4 } }, 'roads');
+  })();
+</script>

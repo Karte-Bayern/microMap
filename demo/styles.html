@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>microMap.js style presets</title>
+  <style>
+    html, body { margin: 0; height: 100%; font: 16px/1.4 system-ui, sans-serif; }
+    #map { height: 100%; background: #f3f5ee; }
+    form { position: absolute; z-index: 2; top: 1rem; left: 1rem; padding: .8rem 1rem; background: #fff;
+      color: #17202a; border: 1px solid #c8d0d3; border-radius: .6rem; box-shadow: 0 2px 12px #0002; }
+    label { display: block; font-weight: 650; margin-bottom: .35rem; }
+    select { font: inherit; padding: .3rem; min-width: 12rem; }
+    p { max-width: 17rem; margin: .5rem 0 0; font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Style preset map"></div>
+  <form>
+    <label for="theme">Map style</label>
+    <select id="theme">
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+      <option value="outdoor">Outdoor</option>
+      <option value="contrast">High contrast</option>
+    </select>
+    <p>Drag, zoom, rotate or tilt to inspect each style. <span id="status" role="status">Loading map…</span></p>
+  </form>
+  <div style="position:absolute;right:.5rem;bottom:.5rem;z-index:2;background:#fffd;padding:.2rem .4rem;font-size:.75rem">
+    Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · <a href="https://openfreemap.org/">OpenFreeMap</a>
+  </div>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.vector.min.js"></script>
+  <script>
+    var fixture = 'data:application/vnd.mapbox-vector-tile;base64,' +
+      'GjoKDnRyYW5zcG9ydGF0aW9uEhEIBxICAAAYAiIHCQAACoBAABoFY2xhc3MiCQoHcHJpbWFyeSiAIHgCGjsKCWxhbmRjb3ZlchIYCAcSAgAAGAMiDgkAABqAQAAAgED/PwAPGgVjbGFzcyIICgZmb3Jlc3QogCB4AhosCgVwbGFjZRIPCAcSAgAAGAEiBQmAQIBAGgVjbGFzcyIGCgR0b3duKIAgeAI=';
+    var map = microMap('#map', { tiles: false, center: [11.5755, 48.1374], zoom: 14, maxZoom: 18 });
+    var vector = null;
+    var backgrounds = { light: '#f3f5ee', dark: '#20272b', outdoor: '#e9f1df', contrast: '#ffffff' };
+    var select = document.getElementById('theme');
+    select.addEventListener('change', function () {
+      document.getElementById('map').style.background = backgrounds[select.value];
+      if (vector) vector.setStyle(microMap.vector.basicStyle({ theme: select.value }));
+    });
+    microMap.vector.fromTileJSON(map, 'https://tiles.openfreemap.org/planet/tiles.json', {
+      style: microMap.vector.basicStyle()
+    }).then(function (layer) {
+      vector = layer;
+      vector.setStyle(microMap.vector.basicStyle({ theme: select.value }));
+      document.getElementById('status').textContent = 'Public OpenFreeMap test tiles.';
+    }).catch(function () {
+      vector = microMap.vector(map, { tiles: fixture, maxZoom: 8, style: microMap.vector.basicStyle({ theme: select.value }) });
+      document.getElementById('status').textContent = 'Offline fixture shown; public tiles unavailable.';
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="microMap.js dynamic GeoJSON overlay demo.">
+  <title>microMap.js GeoJSON overlays</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.4 system-ui, sans-serif; color: #18242b; }
+    #map { background: linear-gradient(145deg, #dce9ee, #f2f5e9 55%, #d8e8d4); }
+    #map[data-micromap-theme="dark"] { background: linear-gradient(145deg, #1b3039, #263b35 55%, #162b35); }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(340px, calc(100vw - 24px)); padding: 12px; border: 1px solid #0002; border-radius: 9px; background: rgb(255 255 255 / 93%); box-shadow: 0 4px 18px #0002; backdrop-filter: blur(8px); }
+    h1 { margin: 0 0 7px; font-size: 16px; }
+    p { margin: 6px 0; }
+    .actions { display: flex; gap: 7px; margin-top: 10px; }
+    button { flex: 1; min-height: 40px; border: 1px solid #61767d; border-radius: 6px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
+    button:hover { background: #edf4f6; }
+    button:focus-visible { outline: 3px solid #1769e0; outline-offset: 2px; }
+    output { display: block; min-height: 2.8em; margin-top: 9px; padding: 6px 8px; border-radius: 5px; background: #edf2f3; color: #334b54; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .hint { color: #51666d; font-size: 12px; }
+    body[data-micromap-theme="dark"] { color: #e9f2f4; }
+    body[data-micromap-theme="dark"] .panel { background: rgb(30 46 54 / 94%); border-color: #58717d; }
+    body[data-micromap-theme="dark"] button { background: #29424d; color: #e9f2f4; border-color: #6e8892; }
+    body[data-micromap-theme="dark"] button:hover { background: #35545f; }
+    body[data-micromap-theme="dark"] output { background: #20343d; color: #d7e9ed; }
+    body[data-micromap-theme="dark"] .hint { color: #b7cbd0; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel" aria-label="GeoJSON overlay controls">
+    <h1>microMap.js · GeoJSON overlays</h1>
+    <p>This network-free example draws an area, a dynamic route and a clickable site marker.</p>
+    <div class="actions">
+      <button id="toggle" type="button">Hide route</button>
+      <button id="move" type="button">Move marker</button>
+      <button id="theme" type="button" aria-pressed="false">Dark theme</button>
+    </div>
+    <output id="status" aria-live="polite">Click the blue marker or red route.</output>
+    <p class="hint">The Canvas overlay uses `updateData`, layer visibility and layer-scoped feature hits; drag, pinch, rotate and tilt still belong to the core map.</p>
+  </section>
+
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.ui.min.js"></script>
+  <script>
+    (function () {
+      var center = [12.491, 48.63];
+      var map = microMap('#map', {
+        tiles: false,
+        center: center,
+        zoom: 13,
+        maxZoom: 18,
+        ariaLabel: 'Interactive GeoJSON overlay demo'
+      });
+      var overlays = microMap.geojson(map);
+      var status = document.getElementById('status');
+      var toggle = document.getElementById('toggle');
+      var move = document.getElementById('move');
+      var theme = document.getElementById('theme');
+      var routeVisible = true;
+      var markerEast = true;
+      var dark = false;
+
+      microMapUI.addControl(map, new microMapUI.NavigationControl(), 'top-right');
+
+      overlays.addSource('demo', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              id: 'coverage',
+              properties: { kind: 'area', name: 'Coverage area' },
+              geometry: { type: 'Polygon', coordinates: [[[12.476, 48.621], [12.507, 48.621], [12.507, 48.640], [12.476, 48.640]]] }
+            },
+            {
+              type: 'Feature',
+              id: 'route',
+              properties: { kind: 'route', color: '#cf3f36', name: 'Example route' },
+              geometry: { type: 'LineString', coordinates: [[12.478, 48.625], [12.486, 48.632], [12.496, 48.628], [12.504, 48.636]] }
+            },
+            {
+              type: 'Feature',
+              id: 'site-marker',
+              properties: { kind: 'site-marker', name: 'Roadworks' },
+              geometry: { type: 'Point', coordinates: [12.501, 48.632] }
+            }
+          ]
+        }
+      });
+      overlays.addLayer({ id: 'coverage-fill', type: 'fill', source: 'demo', filter: ['==', 'kind', 'area'], paint: { 'fill-color': '#7eb46d', 'fill-opacity': 0.22, 'fill-outline-color': '#4b8850', 'fill-outline-width': 1 } });
+      overlays.addLayer({ id: 'route-line', type: 'line', source: 'demo', filter: ['==', 'kind', 'route'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 6 } });
+      overlays.addLayer({ id: 'site-circle', type: 'circle', source: 'demo', filter: ['==', 'kind', 'site-marker'], paint: { 'circle-color': '#1769e0', 'circle-radius': 8, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      overlays.addLayer({ id: 'site-label', type: 'symbol', source: 'demo', filter: ['==', 'kind', 'site-marker'], layout: { 'text-field': ['get', 'name'], 'text-size': 13, 'text-offset': [0, -1.8] }, paint: { 'text-color': '#17313f' } });
+
+      function write(feature) {
+        if (!feature) {
+          status.textContent = 'No overlay feature at this point.';
+          return;
+        }
+        status.textContent = feature.layer.id + '\n' + feature.properties.name;
+      }
+
+      map.on('click', function (event) {
+        write(overlays.queryRenderedFeatures(event.point, { radius: 4 })[0]);
+      });
+
+      toggle.addEventListener('click', function () {
+        routeVisible = !routeVisible;
+        overlays.setLayoutProperty('route-line', 'visibility', routeVisible ? 'visible' : 'none');
+        toggle.textContent = routeVisible ? 'Hide route' : 'Show route';
+        status.textContent = routeVisible ? 'Route visible.' : 'Route hidden.';
+      });
+
+      move.addEventListener('click', function () {
+        markerEast = !markerEast;
+        overlays.getSource('demo').updateData({ update: [{
+          id: 'site-marker', newGeometry: { type: 'Point', coordinates: markerEast ? [12.501, 48.632] : [12.483, 48.634] }
+        }] });
+        status.textContent = 'Marker moved with getSource().updateData().';
+      });
+
+      theme.addEventListener('click', function () {
+        dark = !dark;
+        document.body.setAttribute('data-micromap-theme', dark ? 'dark' : 'light');
+        map.getContainer().setAttribute('data-micromap-theme', dark ? 'dark' : 'light');
+        overlays.setPaintProperties('coverage-fill', dark
+          ? { 'fill-color': '#5c9d76', 'fill-opacity': 0.28, 'fill-outline-color': '#8ec6a2' }
+          : { 'fill-color': '#7eb46d', 'fill-opacity': 0.22, 'fill-outline-color': '#4b8850' });
+        overlays.setPaintProperties('route-line', dark
+          ? { 'line-color': '#ffad80', 'line-width': 7 }
+          : { 'line-color': ['get', 'color'], 'line-width': 6 });
+        overlays.setPaintProperties('site-circle', dark
+          ? { 'circle-color': '#83b9ff', 'circle-stroke-color': '#20313c' }
+          : { 'circle-color': '#1769e0', 'circle-stroke-color': '#fff' });
+        overlays.setPaintProperties('site-label', { 'text-color': dark ? '#f4f5e9' : '#17313f' });
+        theme.setAttribute('aria-pressed', String(dark));
+        theme.textContent = dark ? 'Light theme' : 'Dark theme';
+      });
+    }());
+  </script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>microMap.js · PMTiles archive</title>
+  <style>
+    html, body, #map { margin: 0; width: 100%; height: 100%; }
+    body { font: 14px/1.5 system-ui, sans-serif; color: #17252e; }
+    #map { background: #e8efed; }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(340px, calc(100vw - 24px)); padding: 15px; border: 1px solid #adbfc4; border-radius: 12px; background: #fffffff0; box-shadow: 0 8px 28px #0002; }
+    h1 { margin: 0 0 5px; font-size: 18px; }
+    p { margin: 0 0 10px; }
+    input { width: 100%; }
+    output { display: block; margin-top: 10px; overflow-wrap: anywhere; }
+    small { display: block; margin-top: 9px; color: #52616a; }
+    #credit { position: fixed; right: 8px; bottom: 8px; z-index: 9; max-width: min(70vw, 480px); padding: 3px 7px; background: #ffffffe0; color: #17252e; font-size: 11px; }
+    @media (prefers-color-scheme: dark) { body { color: #e8f0f3; } #map { background: #1c3037; } .panel { background: #14252cf0; border-color: #47616b; } small { color: #aec0c7; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel">
+    <h1>Open a PMTiles archive</h1>
+    <p>Select a local PMTiles v3 file. Its raster or MVT tiles are read on demand; the file stays in this browser.</p>
+    <input id="archive" type="file" accept=".pmtiles,application/vnd.pmtiles">
+    <output id="status" aria-live="polite">Choose a file to begin.</output>
+    <small>Vector archives use a simple preview style generated from their declared source layers. Supply your own reviewed style for production maps.</small>
+  </section>
+  <div id="credit"></div>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.vector.min.js"></script>
+  <script src="../lib/microMap.raster.min.js"></script>
+  <script src="../lib/microMap.pmtiles.min.js"></script>
+  <script>
+    (function () {
+      var map = microMap('#map', { tiles: false, center: [0, 0], zoom: 1, maxZoom: 26 });
+      var active = null;
+      var status = document.getElementById('status');
+      document.getElementById('archive').addEventListener('change', async function (event) {
+        var file = event.target.files[0];
+        if (!file) return;
+        if (active) { active.destroy(); active = null; }
+        document.getElementById('credit').textContent = '';
+        status.textContent = 'Reading archive header…';
+        try {
+          var archive = new microMapPMTiles(file);
+          var header = await archive.getHeader();
+          var metadata = await archive.getMetadata();
+          document.getElementById('credit').textContent = metadata.attribution || '';
+          map.setView(header.center, header.centerZoom);
+          if (header.tileType >= 2 && header.tileType <= 5) {
+            var raster = microMap.raster(map);
+            var source = archive.rasterSource();
+            source.minzoom = header.minZoom;
+            source.maxzoom = header.maxZoom;
+            raster.addSource('archive', source);
+            raster.addLayer({ id: 'archive', type: 'raster', source: 'archive' });
+            active = raster;
+            status.textContent = 'Raster archive ready · zoom ' + header.minZoom + '–' + header.maxZoom;
+          } else if (header.tileType === 1) {
+            var layers = (metadata.vector_layers || []).slice(0, 12);
+            if (!layers.length) throw new Error('This MVT archive has no vector_layers metadata.');
+            var style = [];
+            layers.forEach(function (layer, index) {
+              var id = layer.id;
+              style.push({ id: 'fill-' + index, type: 'fill', 'source-layer': id, paint: { 'fill-color': '#b7d9cc', 'fill-opacity': 0.65 } });
+              style.push({ id: 'line-' + index, type: 'line', 'source-layer': id, paint: { 'line-color': '#316588', 'line-width': 1.5 } });
+              style.push({ id: 'point-' + index, type: 'circle', 'source-layer': id, paint: { 'circle-color': '#d95645', 'circle-radius': 4 } });
+            });
+            active = microMap.vector(map, Object.assign(archive.vectorOptions(), { style: style, minZoom: header.minZoom, maxZoom: header.maxZoom, worker: false }));
+            status.textContent = 'MVT archive ready · ' + layers.length + ' source layers · zoom ' + header.minZoom + '–' + header.maxZoom;
+          } else throw new Error('This archive tile type is not supported by the demo.');
+        } catch (error) { status.textContent = 'Could not open archive: ' + error.message; }
+      });
+    }());
+  </script>
+</body>
+</html>

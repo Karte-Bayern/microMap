@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>microMap.js — Simon Waldherr</title>
+  <meta name="author" content="Simon Waldherr">
+  <meta name="description" content="A small map engine by Simon Waldherr. Explore spatial data, routing and scenario demos with a dependency-free JavaScript core and optional modules.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231769e0'/%3E%3Cpath d='M16 6c-4.4 0-8 3.4-8 7.7C8 19.5 16 26 16 26s8-6.5 8-12.3C24 9.4 20.4 6 16 6zm0 10.5a2.9 2.9 0 1 1 0-5.8 2.9 2.9 0 0 1 0 5.8z' fill='%23fff'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #f7f6f2; --surface: #ffffff; --surface-2: #efeee8; --text: #17202a; --muted: #5b6672; --line: #dedcd3;
+      --accent: #1769e0; --accent-2: #0f9d7a; --accent-soft: #e5eefc; --code-bg: #0f1720; --code-text: #e6edf3;
+      --shadow: 0 10px 30px rgba(20, 30, 40, .10), 0 2px 6px rgba(20, 30, 40, .06);
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0e1319; --surface: #151c24; --surface-2: #1c2530; --text: #e7ecf1; --muted: #9aa6b2; --line: #26313d;
+        --accent: #5b9bff; --accent-2: #37c9a0; --accent-soft: #17263b; --code-bg: #0a0f14;
+        --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0e1319; --surface: #151c24; --surface-2: #1c2530; --text: #e7ecf1; --muted: #9aa6b2; --line: #26313d;
+      --accent: #5b9bff; --accent-2: #37c9a0; --accent-soft: #17263b; --code-bg: #0a0f14; --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    a { color: var(--accent); }
+    :focus { outline: 3px solid var(--accent); outline-offset: 3px; }
+    @supports selector(:focus-visible) {
+      :focus:not(:focus-visible) { outline: none; }
+      :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    }
+    code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+
+    header.top { position: sticky; top: 0; z-index: 50; background: var(--bg); border-bottom: 1px solid var(--line); }
+    @supports (background: color-mix(in srgb, white, transparent)) {
+      header.top { background: color-mix(in srgb, var(--bg) 88%, transparent); }
+    }
+    @supports (backdrop-filter: blur(10px)) { header.top { backdrop-filter: blur(10px); } }
+    header.top .wrap { display: flex; align-items: center; gap: 20px; height: 58px; }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+    .brand svg { width: 26px; height: 26px; }
+    nav.links { display: flex; gap: 18px; margin-left: auto; font-size: 14px; }
+    nav.links a { color: var(--muted); text-decoration: none; }
+    nav.links a:hover { color: var(--text); }
+    #theme { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 8px; width: 34px; height: 34px; cursor: pointer; }
+
+    .hero { padding: 56px 0 36px; }
+    .hero .wrap { display: grid; grid-template-columns: 1fr 1.25fr; gap: 40px; align-items: center; }
+    .eyebrow { display: inline-block; font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft);
+      padding: 3px 10px; border-radius: 999px; margin-bottom: 14px; }
+    h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.08; margin: 0 0 16px; letter-spacing: -.02em; }
+    h1 span { color: var(--accent); }
+    .lead { font-size: 18px; color: var(--muted); margin: 0 0 24px; max-width: 34em; }
+    .cta { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-weight: 600; text-decoration: none;
+      border: 1px solid var(--line); color: var(--text); background: var(--surface); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .install { margin-top: 18px; display: inline-flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line);
+      border-radius: 10px; padding: 7px 8px 7px 14px; font-size: 14px; }
+    .install button { border: 0; background: var(--surface-2); color: var(--text); border-radius: 7px; padding: 4px 10px; cursor: pointer; font: inherit; }
+
+    .map-card { position: relative; height: 460px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
+      border: 1px solid var(--line); background: #dce4e8; }
+    #hero-map { position: absolute; inset: 0; }
+    .map-preview { min-width: 0; }
+    .map-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+    .map-tabs button { min-height: 48px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 600 13px system-ui, sans-serif; padding: 8px 5px; border-radius: 10px; cursor: pointer; }
+    .map-tabs button small { display: block; font-weight: 400; margin-top: 3px; }
+    .map-tabs button[aria-pressed="true"] { background: #1769e0; border-color: #1769e0; color: #fff; }
+    .more-sources { margin-top: 12px; font-size: 13px; color: var(--muted); }
+    .more-sources summary { cursor: pointer; color: var(--accent); padding: 6px 0; }
+    .more-sources ul { margin: 6px 0 0; padding-left: 20px; }
+    .more-sources li { margin: 6px 0; }
+    .map-note { position: absolute; z-index: 20; left: 12px; bottom: 34px; max-width: 70%; font-size: 12px; padding: 4px 9px; border-radius: 8px;
+      background: rgba(255, 255, 255, .92); color: #17202a; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+    .map-note:empty { display: none; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 18px 0 0; }
+    .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+    .stat b { display: block; font-size: 26px; letter-spacing: -.01em; }
+    .stat span { color: var(--muted); font-size: 14px; }
+
+    section { padding: 56px 0; }
+    section h2 { font-size: 30px; margin: 0 0 8px; letter-spacing: -.01em; }
+    section .sub { color: var(--muted); margin: 0 0 28px; max-width: 46em; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+    .card h3 { margin: 10px 0 6px; font-size: 17px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+    .icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+    .icon svg { width: 21px; height: 21px; }
+
+    .module-core { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 0 0 16px; padding: 20px 22px;
+      border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); }
+    .module-core h3 { margin: 0 0 4px; font-size: 18px; }
+    .module-core p { margin: 0; color: var(--muted); font-size: 14px; }
+    .module-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .module-card { display: flex; flex-direction: column; min-width: 0; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+    .module-card.module-facade { grid-column: span 2; }
+    .module-card h3 { margin: 0 0 6px; font-size: 17px; }
+    .module-card p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+    .module-card code { display: block; overflow-wrap: anywhere; font-size: 12px; }
+    .module-card .module-file { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
+    .module-card .module-file span, .module-core .module-size span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+    .module-card .module-sizes { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 14px; font-variant-numeric: tabular-nums; }
+    .module-card .module-sizes span { color: var(--muted); font-size: 12px; }
+    .module-card .module-sizes strong, .module-core .module-size strong { color: var(--accent); font-size: 19px; white-space: nowrap; }
+    .module-core .module-size { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+    .module-note { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+
+    .code-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .code-tabs button { border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 6px 12px; border-radius: 8px; cursor: pointer; font: 600 14px system-ui, sans-serif; }
+    .code-tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+    pre.code { margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: var(--radius); padding: 20px 22px; overflow: auto; font-size: 14px; line-height: 1.55; }
+    pre.code .c { color: #7d8b99; } pre.code .s { color: #a5d6a7; } pre.code .k { color: #82b1ff; } pre.code .f { color: #ffcc80; }
+
+    .demos { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+    .demo { display: block; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 18px; transition: transform .15s, box-shadow .15s; }
+    .demo:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .demo b { display: block; margin-bottom: 4px; }
+    .demo span { color: var(--muted); font-size: 14px; }
+
+    footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: space-between; }
+
+    @media (max-width: 900px) {
+      .hero .wrap { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      .module-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .module-card.module-facade { grid-column: auto; }
+      .demos { grid-template-columns: repeat(2, 1fr); }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      nav.links a.optional { display: none; }
+    }
+    @media (max-width: 560px) {
+      .grid, .demos, .module-grid { grid-template-columns: 1fr; }
+      .map-card { height: 380px; }
+      nav.links { gap: 12px; }
+      nav.links a[href="#features"], nav.links a[href="bench/browser.html"] { display: none; }
+      .hero { padding-top: 32px; }
+      .module-core { align-items: flex-start; }
+    }
+
+    /* Product landing: keep the live map and a clear first action above the fold. */
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb; --surface: #fff; --surface-2: #edf2f8; --text: #152033; --muted: #59677b; --line: #dce3ec;
+      --accent: #1769e0; --accent-2: #07856b; --accent-soft: #e8f0ff; --code-bg: #101a2a; --code-text: #e6edf3;
+      --shadow: 0 18px 44px rgba(23, 42, 70, .13), 0 2px 8px rgba(23, 42, 70, .06); --radius: 18px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { color-scheme: dark; }
+    }
+    :root[data-theme="light"] { color-scheme: light; }
+    :root[data-theme="dark"] { color-scheme: dark; }
+    body { transition: background-color .18s ease, color .18s ease; }
+    @media (prefers-reduced-motion: reduce) { body { transition: none; } }
+    .wrap { max-width: 1280px; }
+    header.top { background: var(--bg); }
+    @supports (background: color-mix(in srgb, white, transparent)) {
+      header.top { background: color-mix(in srgb, var(--bg) 90%, transparent); }
+    }
+    .brand { font-size: 17px; letter-spacing: -.025em; }
+    .brand-tagline { color: var(--muted); font-size: 13px; font-weight: 450; margin-left: 4px; }
+    nav.links { gap: 20px; }
+    #theme { font-size: 17px; line-height: 1; }
+    .hero { padding: 62px 0 42px; }
+    .hero .wrap:first-child { grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: clamp(36px, 5vw, 72px); }
+    .eyebrow { font-size: 12px; letter-spacing: .045em; padding: 5px 11px; margin-bottom: 20px; }
+    h1 { max-width: 15ch; font-size: clamp(42px, 4.5vw, 64px); line-height: 1.04; letter-spacing: -.047em; margin-bottom: 20px; }
+    .lead { max-width: 31em; font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; margin-bottom: 24px; }
+    .cta { gap: 12px; align-items: center; }
+    .btn { min-height: 48px; padding: 11px 18px; border-radius: 11px; transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn.primary { box-shadow: 0 7px 18px rgba(23, 105, 224, .2); }
+    .btn:not(.primary) { border-color: transparent; background: transparent; color: var(--accent); padding-left: 10px; }
+    .hero-proof { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 28px; max-width: 550px; }
+    .proof-item { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .proof-icon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--accent); }
+    .proof-icon svg { width: 19px; height: 19px; }
+    .proof-item b, .proof-copy, .proof-copy > span { display: block; }
+    .proof-item b { font-size: 14px; line-height: 1.2; }
+    .proof-copy { color: var(--muted); }
+    .proof-copy > span { color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 3px; }
+    .map-card { height: clamp(390px, 40vw, 520px); border-radius: 20px; }
+    .map-note { bottom: 12px; max-width: calc(100% - 24px); }
+    .stats { display: none; }
+    .quickstart { padding: 48px 0 56px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); }
+    .quickstart-grid { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(0, 1.2fr) minmax(185px, .55fr); gap: 28px; align-items: center; }
+    .quickstart h2 { margin: 0 0 10px; font-size: clamp(26px, 3vw, 36px); line-height: 1.12; letter-spacing: -.035em; }
+    .quickstart p { color: var(--muted); margin: 0; }
+    .quickstart .kicker { color: var(--accent); font-size: 11px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 10px; }
+    .snippet-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--code-bg); box-shadow: var(--shadow); }
+    .snippet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: #b9c9dd; border-bottom: 1px solid rgba(255,255,255,.12); font-size: 12px; }
+    .snippet-head button { border: 1px solid rgba(255,255,255,.2); border-radius: 7px; background: rgba(255,255,255,.06); color: #fff; padding: 4px 9px; cursor: pointer; font: inherit; }
+    .snippet-card pre { overflow: auto; margin: 0; padding: 17px 18px 19px; color: var(--code-text); font-size: 12px; line-height: 1.55; }
+    .size-ladder { display: grid; gap: 12px; }
+    .size-step { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); font-size: 13px; }
+    .size-step b { white-space: nowrap; font-size: 15px; font-variant-numeric: tabular-nums; }
+    .size-step span { color: var(--muted); }
+    .size-step small { display: block; font-size: 11px; line-height: 1.3; margin-top: 2px; }
+    section { padding: 64px 0; }
+    section h2 { letter-spacing: -.03em; }
+    .card, .module-card, .demo, .stat { box-shadow: 0 2px 8px rgba(23, 42, 70, .035); }
+    .card, .module-card, .demo { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+    .card:hover, .module-card:hover, .demo:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); box-shadow: var(--shadow); }
+    footer .wrap { align-items: center; }
+    @media (max-width: 900px) {
+      .hero .wrap:first-child { grid-template-columns: 1fr; gap: 30px; }
+      .hero-proof { max-width: 650px; }
+      .quickstart-grid { grid-template-columns: 1fr 1.15fr; }
+      .size-ladder { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 620px) {
+      .wrap { padding-left: 18px; padding-right: 18px; }
+      header.top .wrap { gap: 10px; height: 56px; }
+      .brand-tagline { display: none; }
+      nav.links { gap: 12px; font-size: 13px; }
+      .hero { padding: 36px 0 30px; }
+      h1 { max-width: 15ch; font-size: clamp(38px, 10vw, 54px); }
+      .lead { font-size: 17px; }
+      .hero-proof { gap: 10px 8px; }
+      .proof-item { align-items: flex-start; flex-direction: column; gap: 7px; }
+      .proof-icon { flex-basis: 34px; width: 34px; height: 34px; border-radius: 10px; }
+      .proof-item b { font-size: 12px; }
+      .proof-copy > span { font-size: 11px; }
+      .map-card { height: 360px; }
+      .quickstart { padding: 38px 0; }
+      .quickstart-grid { grid-template-columns: 1fr; gap: 18px; }
+      .size-ladder { grid-column: auto; }
+      section { padding: 48px 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="#">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#1769e0"/><path d="M16 6c-4.4 0-8 3.4-8 7.7C8 19.5 16 26 16 26s8-6.5 8-12.3C24 9.4 20.4 6 16 6zm0 10.5a2.9 2.9 0 1 1 0-5.8 2.9 2.9 0 0 1 0 5.8z" fill="#fff"/></svg>
+        microMap.js
+        <span class="brand-tagline">Small maps. Your rules.</span>
+      </a>
+      <nav class="links" aria-label="Sections">
+        <a href="#features">Why microMap</a>
+        <a href="#modules" class="optional">Sizes</a>
+        <a href="#start">Get started</a>
+        <a href="#compare" class="optional">Compare</a>
+        <a href="#demos">Demos</a>
+        <a href="bench/browser.html">Playground</a>
+      </nav>
+      <button id="theme" type="button" aria-label="Use dark mode" aria-pressed="false" title="Use dark mode">◐</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div class="wrap">
+        <div>
+          <span class="eyebrow">A project by Simon Waldherr · MIT licensed</span>
+          <h1>JavaScript maps. <span>A small core with optional modules.</span></h1>
+          <p class="lead">A dependency-free JavaScript map engine for exploring spatial data, routing and scenarios. Start with the raster core and add vector tiles, GeoJSON or UI controls as needed.</p>
+          <div class="cta">
+            <a class="btn primary" href="bench/browser.html">Try the interactive map <span aria-hidden="true">→</span></a>
+            <a class="btn" href="#start">See the setup</a>
+          </div>
+          <div class="hero-proof" aria-label="At a glance">
+            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v8.5"/></svg></span><span class="proof-copy"><b>12.6 kB</b><span>raster core · gzip</span></span></div>
+            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></svg></span><span class="proof-copy"><b>56.3 kB</b><span>core + MVT · gzip</span></span></div>
+            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="proof-copy"><b>Your tile source</b><span>MIT · zero runtime dependencies</span></span></div>
+          </div>
+        </div>
+        <div class="map-preview">
+          <div class="map-tabs" role="group" aria-label="Map tile source">
+            <button type="button" data-source="raster" aria-pressed="true">OpenStreetMap<small>Raster</small></button>
+            <button type="button" data-source="karte-bayern" aria-pressed="false">Karte.Bayern<small>Vector + 2.5D</small></button>
+            <button type="button" data-source="openfreemap" aria-pressed="false">OpenFreeMap<small>Vector + 2.5D</small></button>
+          </div>
+          <div class="map-card">
+            <div id="hero-map" aria-label="Live microMap.js demo"></div>
+            <div class="map-note" id="map-note" role="status"></div>
+          </div>
+          <details class="more-sources">
+            <summary>More sources in the vector tester</summary>
+            <ul>
+              <li><a href="demo/vector.html?source=versatiles">VersaTiles</a> · Shortbread vector tiles</li>
+              <li><a href="demo/vector.html?source=osm-shortbread">OpenStreetMap vector</a> · Shortbread community test source</li>
+              <li><a href="demo/vector.html?source=maplibre-demo">MapLibre demo</a> · Innsbruck extract</li>
+              <li><a href="demo/vector.html">Your own TileJSON or XYZ source</a></li>
+            </ul>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <section class="quickstart" id="start">
+      <div class="wrap quickstart-grid">
+        <div>
+          <p class="kicker">Get started</p>
+          <h2>One file to start.<br>Add only what you need.</h2>
+          <p>Drop the core into your page and choose your tile source. Add-ons can come later, without a bundler or rebuild.</p>
+        </div>
+        <div class="snippet-card">
+          <div class="snippet-head"><span>index.html · raster map</span><button id="copy" type="button">Copy</button></div>
+          <pre><code id="snippet">&lt;div id="map" style="height: 400px"&gt;&lt;/div&gt;
+&lt;script src="lib/microMap.min.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  microMap('#map', {
+    tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors', zoom: 12
+  });
+&lt;/script&gt;</code></pre>
+        </div>
+        <div class="size-ladder" aria-label="Choose a bundle size">
+          <div class="size-step"><span>Raster core<small>Raster tiles and camera</small></span><b>12.6 kB</b></div>
+          <div class="size-step"><span>Core + MVT<small>Vector tiles and styles</small></span><b>56.3 kB</b></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="project" aria-labelledby="project-title">
+      <div class="wrap">
+        <h2 id="project-title">Data, small tools and practical questions</h2>
+        <p class="sub">I'm <a href="https://github.com/SimonWaldherr/" rel="author">Simon Waldherr</a>. My work spans data analysis, web development and volunteer firefighting. microMap brings those interests together in a small, inspectable map engine. These examples are a good place to explore it.</p>
+        <div class="grid">
+          <article class="card">
+            <h3>Explore data on a map</h3>
+            <p>Filter weighted observations over time, inspect features and compare how a dataset changes.</p>
+            <p><a href="demo/heatmap.html">Explore the heatmap →</a></p>
+          </article>
+          <article class="card">
+            <h3>Ask routing questions</h3>
+            <p>Compare travel modes, close a road and see how routes and reachable areas change on a local graph.</p>
+            <p><a href="demo/network.html">Try the routing experiment →</a></p>
+          </article>
+          <article class="card">
+            <h3>Replay a scenario</h3>
+            <p>Move through a timeline, follow simulated units and inject exercise events. An illustrative training demo.</p>
+            <p><a href="demo/scenario.html">Open the scenario timeline →</a></p>
+          </article>
+        </div>
+        <p class="module-note">See the <a href="docs/reference.md">core API and limitations</a>, <a href="docs/modules.md">module examples</a> and <a href="bench/browser.html">browser playground</a>. Test rendering and performance with your own data and devices.</p>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>A small core, optional capabilities</h2>
+        <p class="sub">Every capability is an opt-in file. A store locator loads the core and the UI add-on; a full basemap adds the vector renderer. You only ship what you use.</p>
+        <div class="grid">
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg></div>
+            <h3>Raster slippy map</h3><p>Drag, pinch, wheel, keyboard, inertia, bearing and pitch, bounds, zoom snapping and a context menu in the raster core.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg></div>
+            <h3>Vector tiles</h3><p>A typed-array MVT decoder in a Web Worker, per-tile style buckets and cached Path2D geometry on Canvas 2D.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg></div>
+            <h3>MapLibre Style v8 subset</h3><p>Load selected style.json layers and expressions, with filters, zoom functions, symbol placement and MapLibre zoom semantics.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V9l5-3v14M9 20V4l6 3v13M15 20V10l5 2v8"/></svg></div>
+            <h3>Building extrusions</h3><p><code>fill-extrusion</code> features with cross-tile depth sorting, lighting and picking, drawn with the affine camera.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6.1 7-11.5A7 7 0 0 0 5 9.5C5 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></div>
+            <h3>Markers, popups &amp; controls</h3><p>MapLibre- and Leaflet-shaped markers, popups and tooltips, plus navigation, scale, geolocation and attribution controls.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17c3-6 6 2 9-4s5-4 7-6"/><circle cx="4" cy="17" r="1.5"/><circle cx="20" cy="7" r="1.5"/></svg></div>
+            <h3>GeoJSON &amp; overlays</h3><p>Dynamic routes, tracks and areas; optional field annotations; extra XYZ/WMS and aerial imagery.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+            <h3>Camera animations</h3><p><code>flyTo</code>, <code>easeTo</code>, <code>jumpTo</code> and <code>fitBounds</code> with padding, respecting <code>prefers-reduced-motion</code>.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg></div>
+            <h3>Queries &amp; layer events</h3><p><code>queryRenderedFeatures</code>, <code>click</code>/<code>mouseenter</code> per layer and cursor handling, in MapLibre's event shapes.</p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <h3>Interaction and resource limits</h3><p>Keyboard and screen-reader support, bounded caches, navigation-aware tile preloading and a device-pixel-ratio cap.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="modules">
+      <div class="wrap">
+        <h2>Choose the features you need</h2>
+        <p class="sub">Every map needs the core; add only the files for features you use. Each card names its required files and the total size for that combination.</p>
+        <div class="module-core">
+          <div><h3>1. Core — required for every map</h3><p>Raster map, camera gestures, keyboard controls, basic markers and local feature search.</p><code>microMap.min.js</code></div>
+          <div class="module-size"><span>Core size · minified + gzip</span><strong>12.6 kB</strong></div>
+        </div>
+        <div class="module-grid">
+          <article class="module-card">
+            <h3>Vector maps &amp; styles</h3><p>MVT tiles, light/dark starter palettes, custom colors, a MapLibre Style subset, sprites, patterns, clustering and feature state.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.vector.min.js</code></div>
+            <div class="module-sizes"><span>+43.4 kB · total with core</span><strong>56.3 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Markers, popups &amp; controls</h3><p>Draggable markers, popups, tooltips and controls with CSS theme variables.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.ui.min.js</code></div>
+            <div class="module-sizes"><span>+13.5 kB · total with core</span><strong>26.2 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Dynamic GeoJSON</h3><p>Draw and update application data such as routes, areas and points.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.geojson.min.js</code></div>
+            <div class="module-sizes"><span>+8.2 kB · total with core</span><strong>20.8 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Map annotations</h3><p>Add and edit points, lines or areas. Undo changes and exchange GeoJSON.</p>
+            <div class="module-file"><span>Requires core + GeoJSON, then add</span><code>microMap.field.min.js</code></div>
+            <div class="module-sizes"><span>+2.6 kB · total for all three</span><strong>23.4 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Map measurements</h3><p>Measure air distance, circles and areas, or a shortest path in your graph.</p>
+            <div class="module-file"><span>Requires core + GeoJSON, then add</span><code>microMap.measure.min.js</code></div>
+            <div class="module-sizes"><span>+3.8 kB · total for all three</span><strong>24.6 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>GeoJSON inspection</h3><p>Find malformed coordinates, rings and oversized imports before loading data.</p>
+            <div class="module-file"><span>Add this file to an upload workflow</span><code>microMap.inspect.min.js</code></div>
+            <div class="module-sizes"><span>+1.7 kB · total with core</span><strong>14.4 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Weighted heatmaps</h3><p>Explore point density with weights and an optional time filter.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.heatmap.min.js</code></div>
+            <div class="module-sizes"><span>+2.5 kB · total with core</span><strong>15.2 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Scenario timelines</h3><p>Replay time-based entities and events for simulations, games, logistics and training.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.scenario.min.js</code></div>
+            <div class="module-sizes"><span>+3.2 kB · total with core</span><strong>15.8 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Network routing</h3><p>Find weighted routes and reachable areas with access modes and closures.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.network.min.js</code></div>
+            <div class="module-sizes"><span>+3.2 kB · total with core</span><strong>15.8 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>PNG &amp; print export</h3><p>Save the current map view with loaded tiles, canvas overlays and attribution.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.export.min.js</code></div>
+            <div class="module-sizes"><span>+1.8 kB · total with core</span><strong>14.4 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>PMTiles archives</h3><p>Read local or hosted PMTiles v3 archives on demand for raster or MVT maps.</p>
+            <div class="module-file"><span>Add this file and a renderer</span><code>microMap.pmtiles.min.js</code></div>
+            <div class="module-sizes"><span>+3.3 kB on top of your map</span><strong>Total varies</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Camera animations</h3><p>Use <code>flyTo</code>, <code>easeTo</code>, <code>jumpTo</code> and <code>fitBounds</code>.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.camera.min.js</code></div>
+            <div class="module-sizes"><span>+3.9 kB · total with core</span><strong>16.5 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>Extra raster layers</h3><p>Add additional XYZ or WMS sources, for example an aerial photo overlay.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.raster.min.js</code></div>
+            <div class="module-sizes"><span>+4.0 kB · total with core</span><strong>16.7 kB</strong></div>
+          </article>
+          <article class="module-card">
+            <h3>WebGL surface</h3><p>Provide a custom GPU renderer on a WebGL canvas alongside the map.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.webgl.min.js</code></div>
+            <div class="module-sizes"><span>+1.4 kB · total with core</span><strong>14.1 kB</strong></div>
+          </article>
+          <article class="module-card module-facade">
+            <h3>One combined API</h3><p>Use one facade to connect the core with whichever optional modules you selected.</p>
+            <div class="module-file"><span>Add this file</span><code>microMap.compose.min.js</code></div>
+            <div class="module-sizes"><span>+5.0 kB on top of your selection</span><strong>Total varies</strong></div>
+          </article>
+        </div>
+        <p class="module-note">Load only the modules your map needs. Sizes are separate JavaScript files compressed with gzip level 9.</p>
+      </div>
+    </section>
+
+    <section id="examples">
+      <div class="wrap">
+        <h2>See the API in context</h2>
+        <p class="sub">Start with raster tiles, then browse focused examples for styles, controls or Leaflet-shaped helpers.</p>
+        <div class="code-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected="true" data-code="raster">Raster map</button>
+          <button type="button" role="tab" aria-selected="false" data-code="style">MapLibre style</button>
+          <button type="button" role="tab" aria-selected="false" data-code="ui">Markers &amp; popups</button>
+          <button type="button" role="tab" aria-selected="false" data-code="leaflet">Leaflet style</button>
+        </div>
+        <pre class="code" id="code"></pre>
+      </div>
+    </section>
+
+    <section id="compare">
+      <div class="wrap">
+        <h2>Choose the renderer that fits</h2>
+        <p class="sub">All three projects use permissive code licenses. Map tiles and imagery have separate terms. This page bundles only MicroMap code.</p>
+        <div class="module-grid">
+          <article class="module-card"><h3>MicroMap · MIT</h3><p>A small raster core with optional Canvas vector tiles and GeoJSON. Rotation and affine pitch suit controlled map views; there is no perspective horizon or terrain.</p></article>
+          <article class="module-card"><h3>Leaflet · BSD-2-Clause</h3><p>A mature 2D map library with raster tiles, GeoJSON, markers and a broad plugin ecosystem. Vector-tile rendering uses plugins.</p></article>
+          <article class="module-card"><h3>MapLibre GL JS · BSD-3-Clause</h3><p>A WebGL renderer for vector maps, broad style support, perspective camera, terrain and globe. It is a stronger fit for demanding 3D and style-heavy maps.</p></article>
+        </div>
+        <p class="module-note">License texts: <a href="LICENSE">MicroMap</a>, <a href="https://github.com/Leaflet/Leaflet/blob/main/LICENSE">Leaflet</a> and <a href="https://github.com/maplibre/maplibre-gl-js/blob/main/LICENSE.txt">MapLibre GL JS</a>. Map data and imagery follow their own terms.</p>
+      </div>
+    </section>
+
+    <section id="demos">
+      <div class="wrap">
+        <h2>Demos</h2>
+        <p class="sub">Each demo is a single HTML page. View the source to see how it works.</p>
+        <div class="demos">
+          <a class="demo" href="bench/browser.html"><b>Playground</b><span>Explore places, rotation, tilt, 3D buildings, layers, feature inspection and live rendering metrics.</span></a>
+          <a class="demo" href="demo/index.html"><b>Raster map</b><span>Core map with controls, fly-to places, markers, measuring and preloading.</span></a>
+          <a class="demo" href="demo/vector.html"><b>Vector tiles</b><span>MVT sources, styles, labels and rendered-feature queries.</span></a>
+          <a class="demo" href="demo/geojson.html"><b>GeoJSON</b><span>Dynamic sources and layers for routes, areas and points.</span></a>
+          <a class="demo" href="demo/measure.html"><b>Measurements</b><span>Air distance, circles, polygon area and shortest routes on a local graph.</span></a>
+          <a class="demo" href="demo/heatmap.html"><b>Heatmap</b><span>Weighted density and a time filter on a local point dataset.</span></a>
+          <a class="demo" href="demo/scenario.html"><b>Scenario timeline</b><span>Replay moving units, scrub the clock and inject exercise events.</span></a>
+          <a class="demo" href="demo/network.html"><b>Network routing</b><span>Compare weighted routes, travel modes, closures and reachable areas.</span></a>
+          <a class="demo" href="demo/hazard.html"><b>Hazard exercise</b><span>Replay an illustrative spread perimeter with a time-filtered heat layer.</span></a>
+          <a class="demo" href="demo/field.html"><b>Map annotations</b><span>Draw and edit features, undo changes, import and export GeoJSON.</span></a>
+          <a class="demo" href="demo/pmtiles.html"><b>PMTiles</b><span>Open a local raster or MVT archive directly in the browser.</span></a>
+          <a class="demo" href="demo/simplify.html"><b>Simplification</b><span>How geometry detail adapts to zoom.</span></a>
+        </div>
+        <p class="sub" style="margin-top:18px">The hero map offers Karte.Bayern vector tiles, OpenFreeMap vector tiles and OpenStreetMap raster tiles. The playground also offers both vector providers. With a local MBTiles file, <code>node bench/serve.mjs tiles.mbtiles --style=style.json</code> serves it with your own tiles and style for local measurements.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>microMap.js · by <a href="https://github.com/SimonWaldherr/" rel="author">Simon Waldherr</a> · MIT licensed · <a href="https://simonwaldherr.de/">Personal site</a></span>
+      <span>Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · vector sources: <a href="https://karte.bayern/">Karte.Bayern</a> / <a href="https://openfreemap.org/">OpenFreeMap</a></span>
+    </div>
+  </footer>
+
+  <script src="lib/microMap.min.js"></script>
+  <script src="lib/microMap.camera.min.js"></script>
+  <script src="lib/microMap.compose.min.js"></script>
+  <script src="lib/microMap.ui.min.js"></script>
+  <script src="styles/karte-bayern-blue.js"></script>
+  <script>
+    (function () {
+      var $ = function (selector) { return document.querySelector(selector); };
+
+      // ---- Theme ------------------------------------------------------------
+      function systemDark() {
+        return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+      function syncThemeButton() {
+        var root = document.documentElement;
+        var dark = root.dataset.theme ? root.dataset.theme === 'dark' : systemDark();
+        var button = $('#theme');
+        button.setAttribute('aria-pressed', String(dark));
+        button.setAttribute('aria-label', dark ? 'Use light mode' : 'Use dark mode');
+        button.setAttribute('title', dark ? 'Use light mode' : 'Use dark mode');
+        button.textContent = dark ? '☼' : '◐';
+      }
+      $('#theme').onclick = function () {
+        var root = document.documentElement;
+        var dark = root.dataset.theme ? root.dataset.theme === 'dark' : systemDark();
+        root.dataset.theme = dark ? 'light' : 'dark';
+        syncThemeButton();
+        try { localStorage.setItem('micromap-theme', root.dataset.theme); } catch (error) {}
+      };
+      try { var saved = localStorage.getItem('micromap-theme'); if (saved) document.documentElement.dataset.theme = saved; } catch (error) {}
+      syncThemeButton();
+      if (!document.documentElement.dataset.theme && typeof window.matchMedia === 'function') {
+        var colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+        if (colorScheme.addEventListener) colorScheme.addEventListener('change', syncThemeButton);
+        else if (colorScheme.addListener) colorScheme.addListener(syncThemeButton);
+      }
+
+      $('#copy').onclick = function () {
+        var button = $('#copy');
+        var value = $('#snippet').textContent;
+        function copied(ok) {
+          button.textContent = ok ? 'Copied' : 'Select and copy';
+          setTimeout(function () { button.textContent = 'Copy'; }, 1400);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(function () { copied(true); }, function () { copied(false); });
+          return;
+        }
+        var field = document.createElement('textarea');
+        field.value = value;
+        field.setAttribute('readonly', '');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (error) {}
+        document.body.removeChild(field);
+        copied(ok);
+      };
+
+      // ---- Code samples -----------------------------------------------------
+      function highlight(code) {
+        return code.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/(\/\/[^\n]*)/g, '<span class="c">$1</span>')
+          .replace(/('[^'\n]*')/g, '<span class="s">$1</span>')
+          .replace(/\b(var|const|new|await|function|return)\b/g, '<span class="k">$1</span>');
+      }
+      var SAMPLES = {
+        raster: [
+          '<div id="map" style="height: 400px"></div>',
+          '<script src="lib/microMap.min.js"><\/script>',
+          '<script>',
+          "  var map = microMap('#map', {",
+          "    tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',",
+          "    attribution: '© OpenStreetMap contributors',",
+          '    center: [11.5755, 48.1374], // lon, lat',
+          '    zoom: 13',
+          '  });',
+          "  map.addMarker([11.5755, 48.1374]);",
+          '<\/script>'
+        ].join('\n'),
+        style: [
+          '// microMap.js + microMap.vector.js + microMap.compose.js',
+          "const base = microMap('#map', { tiles: false, tileSize: 512, center: [11.5755, 48.1374], zoom: 15 });",
+          "const style = await (await fetch('https://tiles.openfreemap.org/styles/liberty')).json();",
+          '',
+          '// Renders the style\'s vector, GeoJSON and raster layers on one canvas.',
+          'const map = await microMap.compose.fromStyle(base, style, { camera: true, vectorOptions: { strict: false } });',
+          '',
+          "map.setLayoutProperty('building-3d', 'visibility', 'visible');",
+          'map.flyTo({ center: [11.5755, 48.1374], zoom: 16.5, pitch: 55, bearing: -20 });',
+          "map.on('click', 'building-3d', event => console.log(event.features[0].properties));"
+        ].join('\n'),
+        ui: [
+          '// microMap.ui.js: MapLibre-shaped markers, popups and controls',
+          "new microMapUI.Marker({ color: '#1769e0', draggable: true })",
+          '  .setLngLat([11.5755, 48.1374])',
+          "  .setPopup(new microMapUI.Popup({ offset: 14 }).setText('Marienplatz'))",
+          '  .addTo(map);',
+          '',
+          "map.addControl(new microMapUI.NavigationControl({ visualizePitch: true }), 'top-right');",
+          "map.addControl(new microMapUI.ScaleControl(), 'bottom-left');",
+          'map.addControl(new microMapUI.GeolocateControl());'
+        ].join('\n'),
+        leaflet: [
+          '// Coming from Leaflet? The familiar factories work too.',
+          'var L = microMapUI;',
+          '',
+          'L.marker([48.1374, 11.5755])      // lat, lng like Leaflet',
+          "  .bindPopup('<b>Marienplatz</b>')",
+          "  .bindTooltip('München', { direction: 'top' })",
+          '  .addTo(map);',
+          '',
+          "L.control.scale().addTo(map);"
+        ].join('\n')
+      };
+      function showCode(name) {
+        $('#code').innerHTML = highlight(SAMPLES[name]);
+        document.querySelectorAll('.code-tabs button').forEach(function (button) {
+          button.setAttribute('aria-selected', String(button.dataset.code === name));
+        });
+      }
+      document.querySelectorAll('.code-tabs button').forEach(function (button) {
+        button.onclick = function () { showCode(button.dataset.code); };
+      });
+      showCode('raster');
+
+      // ---- Live hero map ----------------------------------------------------
+      var container = $('#hero-map');
+      var note = $('#map-note');
+      var current = null;
+      var ui = window.microMapUI;
+      var vectorModulePromise = null;
+      var PLACES = [
+        { name: 'Marienplatz', lngLat: [11.5755, 48.1374], text: 'The heart of München.' },
+        { name: 'Englischer Garten', lngLat: [11.5919, 48.1642], text: 'One of the largest urban parks in the world.' },
+        { name: 'Olympiapark', lngLat: [11.5518, 48.1731], text: 'Built for the 1972 Summer Olympics.' }
+      ];
+
+      function decorate(view) {
+        view.addControl(new ui.NavigationControl({ showCompass: true, visualizePitch: true }), 'top-right');
+        view.addControl(new ui.ScaleControl({ maxWidth: 100 }), 'bottom-left');
+        PLACES.forEach(function (place) {
+          var content = document.createElement('div');
+          var title = document.createElement('strong');
+          title.textContent = place.name;
+          content.append(title, document.createElement('br'), place.text);
+          new ui.Marker({ color: '#1769e0' }).setLngLat(place.lngLat)
+            .setPopup(new ui.Popup({ offset: 14, maxWidth: '200px' }).setDOMContent(content)).addTo(view);
+        });
+      }
+
+      function clear() {
+        if (current) {
+          if (current.abort) current.abort.abort();
+          try { if (current.view && current.view.remove) current.view.remove(); else current.base.destroy(); } catch (error) {}
+        }
+        current = null;
+        container.textContent = '';
+        note.textContent = '';
+      }
+
+      function loadVectorModule() {
+        if (window.microMapVector) return Promise.resolve();
+        if (vectorModulePromise) return vectorModulePromise;
+        vectorModulePromise = new Promise(function (resolve, reject) {
+          var script = document.createElement('script');
+          script.src = 'lib/microMap.vector.min.js';
+          script.onload = resolve;
+          script.onerror = function () {
+            vectorModulePromise = null;
+            reject(new Error('vector renderer could not be loaded'));
+          };
+          document.head.appendChild(script);
+        });
+        return vectorModulePromise;
+      }
+
+      function raster() {
+        clear();
+        var base = microMap(container, {
+          tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+          center: [11.574, 48.152], zoom: 12, maxZoom: 19, ariaLabel: 'Map of München'
+        });
+        var view = microMapCompose(base, { camera: true });
+        current = { base: base, view: view };
+        decorate(view);
+        base.on('tileerror', function () {
+          if (current && current.base === base) note.textContent = 'OpenStreetMap tiles could not be loaded. Check your connection.';
+        });
+        note.textContent = 'OpenStreetMap raster tiles · drag to explore, scroll or pinch to zoom';
+      }
+
+      function vector(source) {
+        clear();
+        var kb = source === 'karte-bayern';
+        var provider = kb ? 'Karte.Bayern' : 'OpenFreeMap';
+        var base = microMap(container, { tiles: false, tileSize: kb ? 256 : 512, center: [11.5755, 48.1374], zoom: 14, maxZoom: 19, ariaLabel: 'Vector map of München' });
+        var token = current = { base: base, view: null, abort: new AbortController() };
+        note.textContent = 'Loading ' + provider + ' vector map…';
+        loadVectorModule().then(function () {
+          if (current !== token) return null;
+          return fetch(kb ? 'https://karte.bayern/tilejson.json' : 'https://tiles.openfreemap.org/styles/liberty', { signal: token.abort.signal });
+        }).then(function (response) {
+          if (!response) return null;
+          if (!response.ok) throw new Error('source request failed: HTTP ' + response.status);
+          return response.json();
+        }).then(function (style) {
+          if (current !== token) return null;
+          if (kb) {
+            var contract = microMapKarteBayernBlueStyle.validateTileJSON(style);
+            if (!contract.valid) throw new Error('incompatible Karte.Bayern TileJSON');
+            var profile = microMapKarteBayernBlueStyle({ theme: 'warm', extrudeBuildings: true });
+            var layer = microMapVector(base, {
+              tiles: style.tiles[0], tileJSON: style, minZoom: style.minzoom, maxZoom: style.maxzoom,
+              style: profile, maxDpr: 2
+            });
+            return microMapCompose(base, { vectors: [layer], camera: true });
+          }
+          return microMapCompose.fromStyle(base, style, { camera: true, vectorOptions: { strict: false, maxDpr: 2 } });
+        }).then(function (view) {
+          if (!view) return;
+          if (current !== token) { view.remove(); return; }
+          token.view = view;
+          decorate(view);
+          if (typeof view.getLayers === 'function' && typeof view.getLayoutProperty === 'function' && typeof view.setLayoutProperty === 'function') {
+            view.getLayers().forEach(function (layer) {
+              if (layer.type !== 'symbol' || !layer.id || view.getLayoutProperty(layer.id, 'text-field') == null) return;
+              view.setLayoutProperty(layer.id, 'text-allow-overlap', false);
+              view.setLayoutProperty(layer.id, 'text-ignore-placement', false);
+            });
+          }
+          try { view.setLayoutProperty('building-3d', 'visibility', 'visible'); } catch (error) {}
+          note.textContent = provider + ' vector tiles · 2.5D buildings';
+          view.on('tileerror', function () {
+            if (current === token) note.textContent = provider + ' tiles could not be loaded. Check your connection or choose another source.';
+          });
+          view.flyTo({ center: [11.5755, 48.1374], zoom: 16.3, pitch: 55, bearing: -25, duration: 3200 });
+        }).catch(function (error) {
+          if (current !== token) return;
+          note.textContent = provider + ' could not be loaded: ' + error.message + '. Choose another source, or switch away and back to retry.';
+        });
+      }
+
+      function select(mode) {
+        document.querySelectorAll('[data-source]').forEach(function (button) {
+          button.setAttribute('aria-pressed', String(button.dataset.source === mode));
+        });
+        if (mode === 'karte-bayern' || mode === 'openfreemap') vector(mode); else raster();
+      }
+      document.querySelectorAll('[data-source]').forEach(function (button) {
+        button.onclick = function () { select(button.dataset.source); };
+      });
+      select('raster');
+    }());
+  </script>
+</body>
+</html>

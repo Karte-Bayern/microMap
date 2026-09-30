@@ -1,0 +1,1363 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="microMap.js MVT vector-tile source tester.">
+  <title>microMap.js vector-tile tester</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.4 system-ui, sans-serif; }
+    #map { background: #f3f1ea; }
+    .panel {
+      position: fixed;
+      z-index: 10;
+      top: 12px;
+      left: 12px;
+      width: min(360px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      padding: 12px;
+      border: 1px solid #0002;
+      border-radius: 8px;
+      background: rgb(255 255 255 / 94%);
+      box-shadow: 0 4px 18px #0002;
+      backdrop-filter: blur(8px);
+    }
+    .panel-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      margin: 0 0 7px;
+      padding: 0;
+      border: 0;
+      background: none;
+      font: inherit;
+      font-weight: 700;
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+      min-height: 0;
+    }
+    .panel-toggle .chevron { flex: none; font-size: 12px; color: #5a6b73; transition: transform 0.15s ease; }
+    .panel.collapsed .panel-toggle { margin-bottom: 0; }
+    .panel.collapsed .panel-toggle .chevron { transform: rotate(-90deg); }
+    .panel.collapsed .panel-body { display: none; }
+    .panel p { margin: 7px 0; }
+    label { display: block; margin: 8px 0 3px; font-weight: 650; }
+    select, input:not([type="checkbox"]), button { width: 100%; min-height: 44px; font: inherit; }
+    input:not([type="checkbox"]), select { padding: 5px 7px; }
+    button { margin-top: 7px; cursor: pointer; }
+    code, output { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .source { color: #33424a; }
+    .source strong { color: #152128; display: block; }
+    .source-details { margin: 6px 0; border-top: 1px solid #d8dedf; }
+    .source-details summary { padding: 6px 0 2px; color: #3f535b; cursor: pointer; }
+    .source-detail-body { padding: 3px 0; color: #4e5d64; font-size: 12px; }
+    .source-detail-body p { margin: 4px 0; }
+    .endpoint { display: block; margin-top: 3px; overflow-wrap: anywhere; font-size: 12px; }
+    .note { color: #4e5d64; font-size: 12px; }
+    .status { min-height: 1.4em; color: #46545b; }
+    .location-status { min-height: 1.4em; color: #46545b; font-size: 12px; }
+    .status[data-state="loading"] { color: #245f89; }
+    .status[data-state="ready"] { color: #24613a; }
+    .status[data-state="error"] { color: #9b3316; }
+    .custom-fields[hidden] { display: none; }
+    .toggle { display: flex; align-items: center; gap: 7px; margin: 8px 0 2px; color: #3f535b; font-weight: 500; }
+    .toggle input { width: 18px; height: 18px; margin: 0; accent-color: #1769e0; }
+    fieldset.playground { margin: 13px 0 8px; padding: 8px 10px 10px; border: 1px solid #cbd5d8; border-radius: 6px; }
+    fieldset.playground legend { padding: 0 4px; color: #33424a; font-size: 12px; font-weight: 750; }
+    .range-control { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 10px; margin-top: 8px; }
+    .range-control label { margin: 0; }
+    .range-control input { grid-column: 1 / -1; width: 100%; accent-color: #1769e0; }
+    .range-control output { color: #405057; font-size: 12px; }
+    .playground-actions { display: flex; gap: 7px; }
+    .playground-actions button { flex: 1; }
+    .route-actions { display: flex; gap: 7px; }
+    .route-actions button { flex: 1; }
+    a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 3px solid #1769e0;
+      outline-offset: 2px;
+    }
+    .camera-controls {
+      position: fixed;
+      z-index: 10;
+      top: 12px;
+      right: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, 44px);
+      gap: 7px;
+    }
+    .camera-controls button { width: 44px; min-height: 44px; margin: 0; padding: 4px; background: rgb(255 255 255 / 94%); border: 1px solid #0002; border-radius: 8px; box-shadow: 0 3px 12px #0002; }
+    .camera-controls #locate { grid-column: span 3; width: auto; }
+    .map-attribution {
+      position: fixed;
+      z-index: 4;
+      right: 8px;
+      bottom: 7px;
+      max-width: calc(100vw - 16px);
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: rgb(255 255 255 / 84%);
+      color: #26353d;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .map-attribution a { color: inherit; }
+    @media (max-width: 480px) {
+      .panel { top: auto; bottom: 12px; padding: 10px; }
+      .note { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <aside id="map-attribution" class="map-attribution" aria-label="Map attribution" hidden></aside>
+  <section class="panel" id="panel" aria-label="Vector tile test controls">
+    <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-body">
+      <span>microMap.js · vector-tile tester</span>
+      <span class="chevron" aria-hidden="true">▾</span>
+    </button>
+    <div id="panel-body" class="panel-body">
+      <form id="source-form">
+        <label for="source-select">Vector-tile source</label>
+        <select id="source-select" aria-describedby="source status">
+          <optgroup label="Network-free">
+            <option value="offline-mvt">Embedded MVT fixture (direct)</option>
+            <option value="offline-tilejson">Embedded MVT fixture (TileJSON)</option>
+          </optgroup>
+          <optgroup label="Regional tile sources">
+            <option value="karte-bayern">Karte.Bayern · vector tiles</option>
+          </optgroup>
+        <optgroup label="Public, CORS-enabled test sources">
+          <option value="openfreemap">OpenFreeMap · OpenMapTiles world</option>
+            <option value="versatiles">VersaTiles · Shortbread world</option>
+            <option value="osm-shortbread">OpenStreetMap · Shortbread world</option>
+            <option value="maplibre-demo">MapLibre demo · Innsbruck</option>
+          </optgroup>
+          <optgroup label="Your source">
+            <option value="custom-tilejson">Custom TileJSON URL</option>
+            <option value="custom-xyz">Custom XYZ MVT/PBF template</option>
+          </optgroup>
+        </select>
+        <p id="kb-source-note" class="note" hidden>Karte.Bayern vector tiles are available on this project's GitHub Pages site, through <code>make dev</code>, or on a Karte.Bayern origin.</p>
+        <div id="custom-fields" class="custom-fields" hidden>
+          <label id="custom-label" for="custom-url">TileJSON URL</label>
+          <input id="custom-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="/tiles.json or https://example.test/tiles.json">
+          <button id="load-custom" type="submit">Load source</button>
+        </div>
+      </form>
+      <label for="map-style-select">Map style</label>
+      <select id="map-style-select" aria-describedby="status"></select>
+      <label class="toggle" for="show-points"><input id="show-points" type="checkbox">Show dense point features</label>
+      <label class="toggle" for="show-route"><input id="show-route" type="checkbox">Show example route</label>
+      <div class="route-actions"><button id="fit-route" type="button">Show &amp; fit example route</button></div>
+      <fieldset class="playground">
+        <legend>Camera &amp; buildings</legend>
+        <label for="view-preset">Play preset</label>
+        <select id="view-preset">
+          <option value="custom">Custom camera</option>
+          <option value="overview">Wide overview</option>
+          <option value="street">Street detail</option>
+          <option value="oblique">Oblique city</option>
+          <option value="dramatic">Dramatic tilt</option>
+        </select>
+        <div class="range-control">
+          <label for="bearing-range">Bearing</label><output id="bearing-output">0°</output>
+          <input id="bearing-range" type="range" min="0" max="360" step="1" value="0">
+        </div>
+        <div class="range-control">
+          <label for="pitch-range">Tilt</label><output id="pitch-output">0°</output>
+          <input id="pitch-range" type="range" min="0" max="60" step="1" value="0">
+        </div>
+        <label for="building-mode">Buildings</label>
+        <select id="building-mode">
+          <option value="3d">2.5D extrusion</option>
+          <option value="flat">Flat roofs</option>
+          <option value="hidden">Hide buildings</option>
+        </select>
+        <div class="range-control">
+          <label for="building-height">Fallback height</label><output id="building-height-output">10 m</output>
+          <input id="building-height" type="range" min="3" max="40" step="1" value="10">
+        </div>
+        <label class="toggle" for="auto-orbit"><input id="auto-orbit" type="checkbox">Auto orbit</label>
+        <div class="playground-actions"><button id="reset-playground" type="button">Reset playground</button></div>
+        <p class="note">For visible buildings, choose a source with building polygons, zoom to 12 or closer, then try <strong>Oblique city</strong> or <strong>Dramatic tilt</strong>.</p>
+      </fieldset>
+      <p id="source" class="source"></p>
+      <details id="source-details-panel" class="source-details">
+        <summary>Endpoint &amp; attribution</summary>
+        <div id="source-details" class="source-detail-body"></div>
+      </details>
+    <p class="note">The reference profile keeps the overview useful: connector roads appear before local streets; footways and paths stay out of the base map. Enable dense points only when debugging raw source geometry.</p>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <p id="location-status" class="location-status" role="status" hidden></p>
+      <button id="navigation-preload" type="button" aria-pressed="false">Enable navigation preload</button>
+      <p id="preload-note" class="note">Optional: warms a bounded ring and detail zoom only after visible vector tiles are queued.</p>
+      <p>Drag, pinch, wheel or use the keyboard to explore. Use the controls at top right to rotate, tilt or show your current location. <a href="index.html">Open the raster demo</a>.</p>
+    </div>
+  </section>
+  <section class="camera-controls" aria-label="Camera controls">
+    <button id="north" type="button" aria-label="Reset map orientation">N</button>
+    <button id="rotate-left" type="button" aria-label="Rotate map left by 15 degrees">↶</button>
+    <button id="rotate-right" type="button" aria-label="Rotate map right by 15 degrees">↷</button>
+    <button id="pitch-down" type="button" aria-label="Reduce map tilt">T−</button>
+    <button id="pitch-up" type="button" aria-label="Increase map tilt">T+</button>
+    <button id="locate" type="button" aria-label="Show my current location">GPS</button>
+  </section>
+
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.vector.min.js"></script>
+  <script src="../styles/karte-bayern-blue.js"></script>
+  <script>
+    // Two network-free entries make both direct MVT and TileJSON loading
+    // reproducible. Public entries are intentionally selected only on demand.
+    var fixture = 'data:application/vnd.mapbox-vector-tile;base64,' +
+      'GjoKDnRyYW5zcG9ydGF0aW9uEhEIBxICAAAYAiIHCQAACoBAABoFY2xhc3MiCQoHcHJpbWFyeSiAIHgCGjsKCWxhbmRjb3ZlchIYCAcSAgAAGAMiDgkAABqAQAAAgED/PwAPGgVjbGFzcyIICgZmb3Jlc3QogCB4AhosCgVwbGFjZRIPCAcSAgAAGAEiBQmAQIBAGgVjbGFzcyIGCgR0b3duKIAgeAI=';
+    // A fragment is ignored by fetch for data: URLs, while the placeholders
+    // let the TileJSON validator exercise the same XYZ-template path as a
+    // real service.
+    var fixtureTemplate = fixture + '#/{z}/{x}/{y}.mvt';
+    var offlineTileJSON = 'data:application/json,' + encodeURIComponent(JSON.stringify({
+      tilejson: '3.0.0',
+      name: 'Embedded microMap MVT fixture',
+      tiles: [fixtureTemplate],
+      minzoom: 0,
+      maxzoom: 14,
+      format: 'mvt'
+    }));
+    var start = [12.491, 48.63];
+    var maxCameraZoom = 22;
+    var maxPitch = 60;
+
+    // A locally served demo uses tools/tilecache's generic /fetch?u=<url>
+    // cache by default. Production pages should use their own configured
+    // tile endpoint. Run `make dev` locally; append ?cache=off for direct CORS.
+    // Data: URLs (the offline fixtures) and requests already aimed at the
+    // cache itself are left untouched.
+    var localTilecacheHost = /^(127\.0\.0\.1|localhost|\[?::1\]?)$/i.test(location.hostname) && location.port === '8091';
+    var useLocalCache = localTilecacheHost && new URLSearchParams(location.search).get('cache') !== 'off';
+    var tilecacheOrigin = localTilecacheHost ? location.origin : 'http://127.0.0.1:8091';
+    var microMapPages = location.hostname === 'karte-bayern.github.io' || location.hostname === 'simonwaldherr.github.io';
+    var karteBayernAvailable = (/^(?:.+\.)?karte\.bayern$/i.test(location.hostname)) || (localTilecacheHost && useLocalCache) || microMapPages;
+    document.querySelector('#source-select option[value="karte-bayern"]').disabled = !karteBayernAvailable;
+    document.querySelector('#kb-source-note').hidden = karteBayernAvailable;
+    function proxiedFetch(requestUrl, init) {
+      var target;
+      if (useLocalCache && typeof requestUrl === 'string') {
+        try {
+          // TileJSON is allowed to contain relative templates. Resolve the
+          // URL so same-origin templates stay same-origin, while a remote
+          // endpoint can be handed to tilecache as an absolute URL.
+          target = new URL(requestUrl, location.href);
+        } catch (error) {
+          target = null;
+        }
+        if (target && (target.protocol === 'http:' || target.protocol === 'https:') && target.origin !== location.origin && target.origin !== tilecacheOrigin) {
+          return fetch(tilecacheOrigin + '/fetch?u=' + encodeURIComponent(target.href), init).then(function (response) {
+            if (response && response.ok !== false) return response;
+            throw new Error('Local vector cache proxy rejected this request' + (response && response.status ? ' (' + response.status + ')' : '') + '. Run `make dev` and reload.');
+          }, function (error) {
+            // An aborted request must remain aborted; otherwise report the
+            // missing local cache rather than retrying a cross-origin request.
+            if (error && error.name === 'AbortError') throw error;
+            throw new Error('Local vector cache proxy is unavailable. Run `make dev` and reload; use ?cache=off only with CORS-enabled sources.');
+          });
+        }
+      }
+      return fetch(requestUrl, init);
+    }
+
+    var initialHashState = readHashState();
+    var map = microMap('#map', {
+      tiles: false,
+      center: initialHashState.center || start,
+      zoom: initialHashState.zoom == null ? 4 : initialHashState.zoom,
+      bearing: initialHashState.bearing == null ? 0 : initialHashState.bearing,
+      pitch: initialHashState.pitch == null ? 0 : initialHashState.pitch,
+      maxPitch: maxPitch,
+      maxZoom: maxCameraZoom,
+      ariaLabel: 'Interactive vector tile test map'
+    });
+    var panel = document.querySelector('#panel');
+    var panelToggle = document.querySelector('#panel-toggle');
+    var panelBody = document.querySelector('#panel-body');
+    var sourcePicker = document.querySelector('#source-select');
+    var sourceForm = document.querySelector('#source-form');
+    var customFields = document.querySelector('#custom-fields');
+    var customLabel = document.querySelector('#custom-label');
+    var customURL = document.querySelector('#custom-url');
+    var source = document.querySelector('#source');
+    // `window.status` is a legacy browser property, so avoid that global name
+    // for the live region when this file is loaded as a classic script.
+    var statusElement = document.querySelector('#status');
+    var locationStatus = document.querySelector('#location-status');
+    var sourceDetailsPanel = document.querySelector('#source-details-panel');
+    var sourceDetails = document.querySelector('#source-details');
+    var mapStyleSelect = document.querySelector('#map-style-select');
+    var mapElement = document.querySelector('#map');
+    var mapAttribution = document.querySelector('#map-attribution');
+    var showPoints = document.querySelector('#show-points');
+    showPoints.checked = initialHashState.points;
+    var showRoute = document.querySelector('#show-route');
+    showRoute.checked = initialHashState.route;
+    var fitRouteButton = document.querySelector('#fit-route');
+    var viewPreset = document.querySelector('#view-preset');
+    var bearingRange = document.querySelector('#bearing-range');
+    var bearingOutput = document.querySelector('#bearing-output');
+    var pitchRange = document.querySelector('#pitch-range');
+    var pitchOutput = document.querySelector('#pitch-output');
+    var buildingModeSelect = document.querySelector('#building-mode');
+    var buildingHeightInput = document.querySelector('#building-height');
+    var buildingHeightOutput = document.querySelector('#building-height-output');
+    var autoOrbit = document.querySelector('#auto-orbit');
+    var resetPlayground = document.querySelector('#reset-playground');
+    var layer = null;
+    var activeSourceConfig = null;
+    var selectionVersion = 0;
+    var loadedTiles = 0;
+    var failedTiles = 0;
+    var navigationPreloadButton = document.querySelector('#navigation-preload');
+    var preloadNote = document.querySelector('#preload-note');
+    var northButton = document.querySelector('#north');
+    var rotateLeftButton = document.querySelector('#rotate-left');
+    var rotateRightButton = document.querySelector('#rotate-right');
+    var pitchDownButton = document.querySelector('#pitch-down');
+    var pitchUpButton = document.querySelector('#pitch-up');
+    var locateButton = document.querySelector('#locate');
+    var navigationPreloadEnabled = initialHashState.preload;
+    var lastNavigationCenter = null;
+    var restoringHash = false;
+    var suppressHash = false;
+    var locationMarker = null;
+    var demoRoute = null;
+    var routeStartMarker = null;
+    var routeEndMarker = null;
+    var demoRouteCoordinates = [
+      [12.4711, 48.6236], [12.4784, 48.6265], [12.4875, 48.6291],
+      [12.4962, 48.6332], [12.5056, 48.6387]
+    ];
+    var buildingMode = initialHashState.buildings || '3d';
+    var buildingHeight = initialHashState.buildingHeight || 10;
+    var orbitFrame = 0;
+    var orbitTime = 0;
+
+    var activeStyleFamily = 'generic';
+
+    // Independent of styleFamily (which source schema testStyle is reading,
+    // e.g. OpenMapTiles vs. Shortbread): a palette only changes the colors
+    // painted for the same features, and swapping one in is a pure repaint
+    // via layer.setStyle -- no source reload, no tile refetch.
+    var palettes = {
+      'warm': {
+        label: 'Warm map',
+        mapBackground: '#f3f1ea',
+        water: '#8cc5ef', waterOpacity: 0.92,
+        green: '#c8dfb8', greenOpacity: 0.72, farmland: '#eddcab', farmlandOpacity: 0.72,
+        building: '#ddd7cf', buildingRoof: '#e4ded6', buildingWall: '#807970', buildingOpacity: 0.88, buildingOutline: '#c3baad', buildingOutlineWidth: 0.55,
+        land: '#f3f1ea', landOpacity: 1,
+        waterLine: '#5aaae8', waterLineWidth: 1.8,
+        rail: '#8a8580',
+        roadCasing: '#c4a16b', roadMajor: '#f9f6ef', roadSecondary: '#ffffff', roadMinor: '#ffffff',
+        boundary: '#1a5caa',
+        labelMajor: '#3f4d5a', labelMinor: '#3f4d5a', labelFaint: '#3f4d5a', labelHalo: '#fffdf9', labelFont: '700 "Noto Sans", system-ui, sans-serif',
+        waterLabel: '#4b76a6', waterLabelHalo: '#f8fbff',
+        pointDebugWater: '#5f89c9', pointDebugLand: '#5f89c9'
+      },
+      light: {
+        label: 'Light (default)',
+        mapBackground: '#dce4e8',
+        water: '#a8d9eb', waterOpacity: 0.92,
+        green: '#d8e6ce', greenOpacity: 0.88,
+        building: '#e2d3bf', buildingRoof: '#eee3d3', buildingWall: '#958575', buildingOpacity: 0.9, buildingOutline: '#c9bca9', buildingOutlineWidth: 0.45,
+        land: '#edf0e8', landOpacity: 0.92,
+        waterLine: '#4c9eca', waterLineWidth: 1.45,
+        rail: '#7d8587',
+        roadCasing: '#e68758', roadMajor: '#fff6ee', roadSecondary: '#ffffff', roadMinor: '#ffffff',
+        boundary: '#939ba0',
+        labelMajor: '#26353d', labelMinor: '#405057', labelFaint: '#59666c', labelHalo: '#fffdf7',
+        waterLabel: '#337da4', waterLabelHalo: '#fdfdf9',
+        pointDebugWater: '#388ab6', pointDebugLand: '#46545b'
+      },
+      dark: {
+        label: 'Dark',
+        mapBackground: '#141a1e',
+        water: '#1c3f52', waterOpacity: 0.95,
+        green: '#233524', greenOpacity: 0.85,
+        building: '#3a3630', buildingRoof: '#4a453d', buildingWall: '#1f1d19', buildingOpacity: 0.92, buildingOutline: '#4c463c', buildingOutlineWidth: 0.45,
+        land: '#20272b', landOpacity: 0.95,
+        waterLine: '#3f7fa0', waterLineWidth: 1.45,
+        rail: '#5b6569',
+        roadCasing: '#7b4b35', roadMajor: '#d97b4a', roadSecondary: '#a67a4a', roadMinor: '#565f63',
+        boundary: '#54606a',
+        labelMajor: '#e7ecef', labelMinor: '#b8c2c8', labelFaint: '#8b969c', labelHalo: '#141a1e',
+        waterLabel: '#7fc2e6', waterLabelHalo: '#0e1a20',
+        pointDebugWater: '#5aa8cc', pointDebugLand: '#9aa4a9'
+      },
+      night: {
+        label: 'Night nautical',
+        mapBackground: '#050c14',
+        water: '#082035', waterOpacity: 1,
+        green: '#0d1f14', greenOpacity: 0.9,
+        building: '#141c24', buildingRoof: '#1d2933', buildingWall: '#060b10', buildingOpacity: 0.94, buildingOutline: '#22303a', buildingOutlineWidth: 0.4,
+        land: '#0a1119', landOpacity: 1,
+        waterLine: '#1d5273', waterLineWidth: 1.3,
+        rail: '#2a3742',
+        roadCasing: '#604822', roadMajor: '#e0a95a', roadSecondary: '#7a6236', roadMinor: '#2f3d47',
+        boundary: '#334452',
+        labelMajor: '#dfe8ee', labelMinor: '#9fb0bb', labelFaint: '#6c7c87', labelHalo: '#050c14',
+        waterLabel: '#5f9fc4', waterLabelHalo: '#03070c',
+        pointDebugWater: '#3f7fa3', pointDebugLand: '#5a6a75'
+      },
+      contrast: {
+        label: 'High contrast',
+        mapBackground: '#ffffff',
+        water: '#0a5fa8', waterOpacity: 1,
+        green: '#1c6b2e', greenOpacity: 0.55,
+        building: '#000000', buildingRoof: '#f5f5f5', buildingWall: '#000000', buildingOpacity: 0.7, buildingOutline: '#000000', buildingOutlineWidth: 0.9,
+        land: '#ffffff', landOpacity: 1,
+        waterLine: '#0a5fa8', waterLineWidth: 2,
+        rail: '#000000',
+        roadCasing: '#000000', roadMajor: '#c8102e', roadSecondary: '#8a5a00', roadMinor: '#000000',
+        boundary: '#000000',
+        labelMajor: '#000000', labelMinor: '#000000', labelFaint: '#000000', labelHalo: '#ffffff',
+        waterLabel: '#0a5fa8', waterLabelHalo: '#ffffff',
+        pointDebugWater: '#0a5fa8', pointDebugLand: '#000000'
+      }
+    };
+    var activeMapStyle = 'warm';
+    Object.keys(palettes).forEach(function (key) {
+      var option = document.createElement('option');
+      option.value = key;
+      option.textContent = palettes[key].label;
+      mapStyleSelect.appendChild(option);
+    });
+
+    function setMapStyle(key) {
+      if (!palettes[key]) key = 'warm';
+      activeMapStyle = key;
+      mapStyleSelect.value = key;
+      mapElement.style.background = activeSourceConfig && activeSourceConfig.styleFamily === 'karte-bayern'
+        ? window.microMapKarteBayernBlueStyle({ theme: key }).background : palettes[key].mapBackground;
+      if (layer) layer.setStyle(styleForConfig(activeSourceConfig));
+    }
+
+    function propertyText(properties, names) {
+      for (var i = 0; i < names.length; i++) {
+        var value = properties[names[i]];
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
+          value = String(value).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (value) return value.slice(0, 120);
+        }
+      }
+      return '';
+    }
+
+    function featureKind(properties) {
+      return String(properties.class || properties.kind || properties.type || properties.category || properties.subclass || '').toLowerCase();
+    }
+
+    function sourceDescription(sourceLayer, kind) {
+      return String(sourceLayer || '').toLowerCase() + ' ' + kind;
+    }
+
+    function roadInstruction(description, zoom, palette) {
+      var major = /motorway|trunk|primary/.test(description);
+      var secondary = /secondary|tertiary/.test(description);
+      var local = /residential|unclassified/.test(description);
+      if (zoom < 9 && !major) return null;
+      if (zoom < 13 && !major && !secondary) return null;
+      // Paths, tracks, cycleways and service spurs deliberately do not fall
+      // through as local roads. They are very numerous and belong in a
+      // dedicated outdoor/detail layer, not the fast base-map callback.
+      if (!major && !secondary && !local) return null;
+      var width = major ? (zoom >= 12 ? 3.4 : 2) : secondary ? (zoom >= 12 ? 2.25 : 1.15) : 1;
+      var color = major ? palette.roadMajor : secondary ? palette.roadSecondary : palette.roadMinor;
+      return [
+        { type: 'line', color: palette.roadCasing || color, width: width + (major ? 1.8 : secondary ? 1.25 : 1), lineCap: 'round', lineJoin: 'round' },
+        { type: 'line', color: color, width: width, lineCap: 'round', lineJoin: 'round' }
+      ];
+    }
+
+    function placeLabel(properties, kind, zoom, palette) {
+      var label = propertyText(properties, ['name:de', 'name', 'name_en', 'name:latin']);
+      if (!label) return null;
+      var important = /capital|city|town/.test(kind);
+      if (important && zoom >= 7) return { type: 'symbol', text: label, size: kind.indexOf('city') >= 0 ? 13 : 12, font: palette.labelFont, color: palette.labelMajor, haloColor: palette.labelHalo, haloWidth: 1.6, priority: 5 };
+      if (/village|municipality/.test(kind) && zoom >= 11) return { type: 'symbol', text: label, size: 11, font: palette.labelFont, color: palette.labelMinor, haloColor: palette.labelHalo, haloWidth: 1.4, priority: 3 };
+      if (zoom >= 14 && /hamlet|locality|suburb|neighbourhood/.test(kind)) return { type: 'symbol', text: label, size: 10, font: palette.labelFont, color: palette.labelFaint, haloColor: palette.labelHalo, haloWidth: 1.2, priority: 1 };
+      return null;
+    }
+
+    function waterLabel(properties, placement, zoom, palette) {
+      var label = propertyText(properties, ['name:de', 'name', 'name_en', 'name:latin']);
+      if (!label || zoom < 10) return null;
+      return {
+        type: 'symbol',
+        text: label,
+        placement: placement,
+        size: placement === 'line' ? 11 : 11.5,
+        font: palette.labelFont,
+        color: palette.waterLabel,
+        haloColor: palette.waterLabelHalo,
+        haloWidth: 1.5,
+        priority: 4
+      };
+    }
+
+    function optionalPointDebug(feature, water, palette) {
+      return showPoints && showPoints.checked && feature.type === 1
+        ? { type: 'circle', color: water ? palette.pointDebugWater : palette.pointDebugLand, radius: 1.8, opacity: 0.48 }
+        : null;
+    }
+
+    function genericTestStyle(sourceLayer, feature, zoom, palette) {
+      var properties = feature.properties || {};
+      var kind = featureKind(properties);
+      var description = sourceDescription(sourceLayer, kind);
+      var water = /water|ocean|sea|river|lake|stream|canal/.test(description);
+      var farmland = /farmland|orchard|vineyard/.test(description);
+      var green = /landcover|landuse|park|forest|wood|green|grass|meadow|nature/.test(description);
+      var building = /building|structure/.test(description);
+      var road = /road|street|highway|transport|motorway|trunk|primary|secondary|tertiary/.test(description);
+      var place = /place|settlement|locality|label/.test(String(sourceLayer || '').toLowerCase()) || /city|town|village|hamlet|capital|municipality/.test(kind);
+
+      if (feature.type === 3) {
+        if (water) return { type: 'fill', color: palette.water, opacity: palette.waterOpacity };
+        if (building && zoom >= 12) return buildingInstruction(palette, properties,
+          properties.render_height == null ? 'height' : 'render_height',
+          properties.render_min_height == null ? 'min_height' : 'render_min_height');
+        if (farmland) return { type: 'fill', color: palette.farmland || palette.green, opacity: palette.farmlandOpacity == null ? palette.greenOpacity : palette.farmlandOpacity };
+        if (green) return { type: 'fill', color: palette.green, opacity: palette.greenOpacity };
+        if (/land|earth|background/.test(description)) return { type: 'fill', color: palette.land, opacity: palette.landOpacity };
+        return null;
+      }
+      if (feature.type === 2) {
+        if (water) {
+          var waterLine = { type: 'line', color: palette.waterLine, width: palette.waterLineWidth, lineCap: 'round', lineJoin: 'round' };
+          var lineLabel = waterLabel(properties, 'line', zoom, palette);
+          return lineLabel ? [waterLine, lineLabel] : waterLine;
+        }
+        if (/rail/.test(description)) return zoom >= 10 ? { type: 'line', color: palette.rail, width: 1.1, lineCap: 'round', lineJoin: 'round' } : null;
+        if (road) {
+          var roadLine = roadInstruction(description, zoom, palette);
+          var streetName = propertyText(properties, ['name:de', 'name']);
+          if (roadLine && streetName && zoom >= 14) return roadLine.concat([{ type: 'symbol', text: streetName, placement: 'line', size: 10, font: palette.labelFont, color: palette.labelFaint, haloColor: palette.labelHalo, haloWidth: 1.2, priority: 1 }]);
+          return roadLine;
+        }
+        if (/boundary/.test(description) && zoom >= 8) return { type: 'line', color: palette.boundary, width: 1, opacity: 0.75 };
+        return null;
+      }
+      if (feature.type === 1) {
+        var label = place ? placeLabel(properties, kind, zoom, palette) : (water ? waterLabel(properties, 'point', zoom, palette) : null);
+        return label || optionalPointDebug(feature, water, palette);
+      }
+      return null;
+    }
+
+    function shortbreadTestStyle(sourceLayer, feature, zoom, palette) {
+      var properties = feature.properties || {};
+      var layerName = String(sourceLayer || '').toLowerCase();
+      var kind = featureKind(properties);
+      var style;
+      if (layerName === 'ocean') return feature.type === 3 ? { type: 'fill', color: palette.water, opacity: Math.min(1, palette.waterOpacity + 0.04) } : null;
+      if (layerName === 'land') {
+        if (feature.type !== 3) return null;
+        return /wood|forest|grass|park|green|farmland|meadow/.test(kind)
+          ? { type: 'fill', color: palette.green, opacity: palette.greenOpacity + 0.02 }
+          : { type: 'fill', color: palette.land, opacity: palette.landOpacity + 0.02 };
+      }
+      if (layerName === 'water_polygons') return feature.type === 3 ? { type: 'fill', color: palette.water, opacity: palette.waterOpacity + 0.02 } : null;
+      if (layerName === 'water_lines') return feature.type === 2 ? { type: 'line', color: palette.waterLine, width: palette.waterLineWidth, lineCap: 'round', lineJoin: 'round' } : null;
+      if (layerName === 'boundaries') return feature.type === 2 && zoom >= 8 ? { type: 'line', color: palette.boundary, width: 1, opacity: 0.78 } : null;
+      if (layerName === 'buildings') return feature.type === 3 && zoom >= 13 ? buildingInstruction(palette, properties, 'height', 'min_height') : null;
+      if (layerName === 'streets' && feature.type === 2) {
+        style = roadInstruction(layerName + ' ' + kind, zoom, palette);
+        var street = propertyText(properties, ['name:de', 'name']);
+        if (style && street && zoom >= 14) return style.concat([{ type: 'symbol', text: street, placement: 'line', size: 10, font: palette.labelFont, color: palette.labelFaint, haloColor: palette.labelHalo, haloWidth: 1.2, priority: 1 }]);
+        return style;
+      }
+      if (layerName === 'place_labels') return placeLabel(properties, kind, zoom, palette) || optionalPointDebug(feature, false, palette);
+      if (layerName === 'water_polygons_labels') return waterLabel(properties, 'point', zoom, palette) || optionalPointDebug(feature, true, palette);
+      if (layerName === 'water_lines_labels') return waterLabel(properties, 'line', zoom, palette);
+      if (layerName === 'street_labels' && feature.type === 2 && zoom >= 14) {
+        var streetLabel = propertyText(properties, ['name:de', 'name']);
+        return streetLabel ? { type: 'symbol', text: streetLabel, placement: 'line', size: 10, font: palette.labelFont, color: palette.labelFaint, haloColor: palette.labelHalo, haloWidth: 1.2, priority: 1 } : null;
+      }
+      return optionalPointDebug(feature, false, palette);
+    }
+
+    // Read the active palette at paint time (not at setStyle time) so a
+    // style switch only needs layer.setStyle(testStyle) to repaint -- see
+    // the map-style-select handler below.
+    function testStyle(sourceLayer, feature, zoom) {
+      var palette = palettes[activeMapStyle] || palettes['warm'];
+      return activeStyleFamily === 'shortbread'
+        ? shortbreadTestStyle(sourceLayer, feature, zoom, palette)
+        : genericTestStyle(sourceLayer, feature, zoom, palette);
+    }
+
+    function buildingInstruction(palette, properties, heightProperty, baseProperty) {
+      if (buildingMode === 'hidden') return null;
+      if (buildingMode === 'flat') {
+        return { type: 'fill', color: palette.building, opacity: palette.buildingOpacity, outlineColor: palette.buildingOutline, outlineWidth: palette.buildingOutlineWidth };
+      }
+      // Callback-style layers hand their return value straight to the
+      // renderer (see styleInstruction's `typeof style === 'function'`
+      // branch in microMap.vector.js) -- unlike declarative paint objects,
+      // it never runs expressions like ['get', prop], so the property has
+      // to be resolved here instead.
+      var height = Number(properties[heightProperty]);
+      var base = Number(properties[baseProperty]);
+      return {
+        type: 'fill-extrusion',
+        // Public MVT schemas often omit building height. A stable fallback
+        // keeps this playground visibly 2.5D instead of flattening to zero.
+        color: palette.buildingWall || palette.building,
+        roofColor: palette.buildingRoof || palette.building,
+        opacity: palette.buildingOpacity,
+        height: isFinite(height) && height > 0 ? height : buildingHeight,
+        base: isFinite(base) && base > 0 ? base : 0
+      };
+    }
+
+    function styleForConfig(config) {
+      if (config && config.styleFamily === 'karte-bayern') {
+        return window.microMapKarteBayernBlueStyle({
+          theme: activeMapStyle,
+          buildings: buildingMode !== 'hidden',
+          extrudeBuildings: buildingMode === '3d',
+          buildingHeight: buildingHeight,
+          showDensePoints: showPoints.checked
+        });
+      }
+      return testStyle;
+    }
+
+    var sources = {
+      'offline-mvt': {
+        label: 'Embedded MVT fixture (direct)',
+        kind: 'tiles',
+        tiles: fixture,
+        endpoint: 'embedded data: MVT',
+        styleFamily: 'generic',
+        center: start,
+        zoom: 4,
+        minZoom: 0,
+        maxZoom: 14,
+        credit: 'Network-free fixture; it repeats a tiny real MVT across the visible tile grid.'
+      },
+      'offline-tilejson': {
+        label: 'Embedded MVT fixture (TileJSON)',
+        kind: 'tilejson',
+        tileJSON: offlineTileJSON,
+        endpoint: 'embedded data: TileJSON → MVT',
+        styleFamily: 'generic',
+        center: start,
+        zoom: 4,
+        credit: 'Network-free TileJSON fixture; useful for exercising the TileJSON loader as well as the MVT decoder.'
+      },
+      'karte-bayern': {
+        label: 'Karte.Bayern · vector tiles',
+        kind: 'tilejson',
+        tileJSON: 'https://karte.bayern/tilejson.json',
+        endpoint: 'https://karte.bayern/tilejson.json',
+        homepage: 'https://karte.bayern/',
+        homepageLabel: 'Karte.Bayern',
+        styleFamily: 'karte-bayern',
+        center: [11.576, 48.137],
+        zoom: 10,
+        attribution: {
+          label: '© OpenStreetMap contributors',
+          href: 'https://www.openstreetmap.org/copyright'
+        },
+        credit: '© OpenStreetMap contributors (ODbL 1.0). Karte.Bayern serves revisioned MVT tiles; the demo uses its own compact vector style.'
+      },
+      openfreemap: {
+        label: 'OpenFreeMap · OpenMapTiles world',
+        kind: 'tilejson',
+        tileJSON: 'https://tiles.openfreemap.org/planet/tiles.json',
+        endpoint: 'https://tiles.openfreemap.org/planet/tiles.json',
+        homepage: 'https://openfreemap.org/',
+        homepageLabel: 'OpenFreeMap',
+        styleFamily: 'generic',
+        center: start,
+        zoom: 10,
+        credit: 'Public test source. Data © OpenMapTiles and OpenStreetMap contributors.'
+      },
+      versatiles: {
+        label: 'VersaTiles · Shortbread world',
+        // Its TileJSON deliberately uses a relative extensionless template,
+        // which this compact helper rejects as ambiguous. The documented
+        // absolute XYZ endpoint is still a real CORS-enabled MVT source.
+        kind: 'tiles',
+        tiles: 'https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}',
+        endpoint: 'https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}',
+        homepage: 'https://docs.versatiles.org/guides/use_tiles_versatiles_org',
+        homepageLabel: 'VersaTiles usage notes',
+        styleFamily: 'shortbread',
+        center: start,
+        zoom: 10,
+        minZoom: 0,
+        maxZoom: 14,
+        credit: 'Public test source. Data © OpenStreetMap contributors and ESA WorldCover 2021.'
+      },
+      'osm-shortbread': {
+        label: 'OpenStreetMap · Shortbread world',
+        kind: 'tilejson',
+        tileJSON: 'https://vector.openstreetmap.org/shortbread_v1/tilejson.json',
+        endpoint: 'https://vector.openstreetmap.org/shortbread_v1/tilejson.json',
+        homepage: 'https://operations.osmfoundation.org/policies/vector/',
+        homepageLabel: 'OSM vector-tile policy',
+        styleFamily: 'shortbread',
+        center: start,
+        zoom: 10,
+        credit: 'Best-effort community test source. Data © OpenStreetMap contributors; please use it interactively, not for bulk requests.'
+      },
+      'maplibre-demo': {
+        label: 'MapLibre demo · Innsbruck',
+        kind: 'tilejson',
+        tileJSON: 'https://demotiles.maplibre.org/tiles-omt/tiles.json',
+        endpoint: 'https://demotiles.maplibre.org/tiles-omt/tiles.json',
+        homepage: 'https://github.com/maplibre/demotiles',
+        homepageLabel: 'MapLibre demotiles',
+        styleFamily: 'generic',
+        center: [11.404, 47.267],
+        // The source is bounded to a small Innsbruck-area extract; z12 keeps
+        // the initial viewport inside it on ordinary desktop widths.
+        zoom: 12,
+        credit: 'Demo-only source around Innsbruck. Data © OpenMapTiles and OpenStreetMap contributors.'
+      }
+    };
+
+    function hashNumber(params, name, minimum, maximum) {
+      var text = params.get(name);
+      var value = Number(text);
+      return text !== null && text !== '' && isFinite(value) && value >= minimum && value <= maximum ? value : null;
+    }
+
+    function readHashState() {
+      var params = new URLSearchParams(location.hash.slice(1));
+      var longitude = hashNumber(params, 'lon', -180, 180);
+      var latitude = hashNumber(params, 'lat', -85.0511287798, 85.0511287798);
+      return {
+        source: params.get('source'),
+        url: params.get('url'),
+        center: longitude === null || latitude === null ? null : [longitude, latitude],
+        zoom: hashNumber(params, 'zoom', 0, maxCameraZoom),
+        bearing: hashNumber(params, 'bearing', 0, 360),
+        pitch: hashNumber(params, 'pitch', 0, maxPitch),
+        preload: params.get('preload') === '1',
+        points: params.get('points') === '1',
+        route: params.get('route') === '1',
+        style: params.get('style'),
+        buildings: /^(3d|flat|hidden)$/.test(params.get('buildings')) ? params.get('buildings') : '3d',
+        buildingHeight: hashNumber(params, 'buildingheight', 3, 40)
+      };
+    }
+
+    function isCustomSource(sourceId) {
+      return sourceId === 'custom-tilejson' || sourceId === 'custom-xyz';
+    }
+
+    function validCustomURL(url, isTileJSON) {
+      return !!url && (isTileJSON || (url.indexOf('{z}') >= 0 && url.indexOf('{x}') >= 0 && url.indexOf('{y}') >= 0));
+    }
+
+    function customSourceConfig(url, isTileJSON) {
+      return {
+        label: isTileJSON ? 'Custom TileJSON source' : 'Custom XYZ MVT/PBF source',
+        kind: isTileJSON ? 'tilejson' : 'tiles',
+        tileJSON: isTileJSON ? url : null,
+        tiles: isTileJSON ? null : url,
+        endpoint: url,
+        styleFamily: 'generic',
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        credit: 'Make sure the endpoint permits browser CORS requests and add the provider attribution required for your source.'
+      };
+    }
+
+    function updateHash() {
+      if (restoringHash || suppressHash) return;
+      var center = map.getCenter();
+      var params = new URLSearchParams();
+      params.set('source', sourcePicker.value);
+      if (customMode()) {
+        var url = customURL.value.trim();
+        if (url) params.set('url', url);
+      }
+      params.set('lon', String(center[0]));
+      params.set('lat', String(center[1]));
+      params.set('zoom', String(map.getZoom()));
+      params.set('bearing', String(map.getBearing()));
+      params.set('pitch', String(map.getPitch()));
+      if (navigationPreloadEnabled) params.set('preload', '1');
+      if (showPoints.checked) params.set('points', '1');
+      if (showRoute.checked) params.set('route', '1');
+      if (activeMapStyle !== 'warm') params.set('style', activeMapStyle);
+      if (buildingMode !== '3d') params.set('buildings', buildingMode);
+      if (buildingHeight !== 10) params.set('buildingheight', String(buildingHeight));
+      var hash = params.toString();
+      if (location.hash.slice(1) !== hash) {
+        history.replaceState(null, '', location.pathname + location.search + '#' + hash);
+      }
+    }
+
+    function setStatus(message, state) {
+      statusElement.textContent = message;
+      statusElement.dataset.state = state || '';
+    }
+
+    function updateCameraControls() {
+      var bearing = map.getBearing();
+      var pitch = map.getPitch();
+      northButton.disabled = bearing === 0;
+      pitchDownButton.disabled = pitch === 0;
+      pitchUpButton.disabled = pitch === maxPitch;
+      northButton.setAttribute('aria-label', bearing ? 'Reset map orientation (' + bearing.toFixed(0) + ' degrees)' : 'Map orientation is north-up');
+      northButton.title = bearing ? 'Reset orientation (' + bearing.toFixed(0) + '°)' : 'North-up';
+      pitchDownButton.title = 'Reduce tilt (' + pitch.toFixed(0) + '°)';
+      pitchUpButton.title = 'Increase tilt (' + pitch.toFixed(0) + '°)';
+      bearingRange.value = String(Math.round(bearing));
+      pitchRange.value = String(Math.round(pitch));
+      bearingOutput.value = Math.round(bearing) + '°';
+      pitchOutput.value = Math.round(pitch) + '°';
+    }
+
+    function setBuildingMode(next) {
+      buildingMode = /^(3d|flat|hidden)$/.test(next) ? next : '3d';
+      buildingModeSelect.value = buildingMode;
+      if (layer) layer.setStyle(styleForConfig(activeSourceConfig));
+    }
+
+    function setBuildingHeight(next) {
+      next = Math.round(Number(next));
+      buildingHeight = isFinite(next) ? Math.max(3, Math.min(40, next)) : 10;
+      buildingHeightInput.value = String(buildingHeight);
+      buildingHeightOutput.value = buildingHeight + ' m';
+      if (layer && buildingMode === '3d') layer.setStyle(styleForConfig(activeSourceConfig));
+    }
+
+    function applyPlayPreset(preset) {
+      var zoom = map.getZoom();
+      if (preset === 'overview') map.setView(map.getCenter(), Math.min(5, zoom)).setBearing(0).setPitch(0);
+      else if (preset === 'street') map.setView(map.getCenter(), Math.max(15, zoom)).setBearing(0).setPitch(0);
+      else if (preset === 'oblique') map.setView(map.getCenter(), Math.max(15, zoom)).setBearing(35).setPitch(42);
+      else if (preset === 'dramatic') map.setView(map.getCenter(), Math.max(16, zoom)).setBearing(220).setPitch(maxPitch);
+      updateCameraControls();
+    }
+
+    function stopOrbit() {
+      if (orbitFrame) cancelAnimationFrame(orbitFrame);
+      orbitFrame = 0;
+      orbitTime = 0;
+      autoOrbit.checked = false;
+    }
+
+    function orbit(now) {
+      if (!autoOrbit.checked) return;
+      if (orbitTime) map.setBearing(map.getBearing() + (now - orbitTime) * 0.018);
+      orbitTime = now;
+      orbitFrame = requestAnimationFrame(orbit);
+    }
+
+    function setOrbit(enabled) {
+      if (!enabled) return stopOrbit();
+      if (orbitFrame) return;
+      autoOrbit.checked = true;
+      orbitTime = 0;
+      orbitFrame = requestAnimationFrame(orbit);
+    }
+
+    function locationElement() {
+      var dot = document.createElement('div');
+      dot.className = 'micromap-location';
+      dot.setAttribute('aria-hidden', 'true');
+      dot.title = 'Current location';
+      dot.style.cssText = 'position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border:3px solid #fff;' +
+        'border-radius:50%;background:#1677e8;box-shadow:0 1px 5px rgba(0,0,0,.45);pointer-events:none';
+      return dot;
+    }
+
+    function routeMarkerElement(label, color) {
+      var marker = document.createElement('div');
+      marker.setAttribute('aria-hidden', 'true');
+      marker.title = label === 'A' ? 'Example route start' : 'Example route end';
+      marker.textContent = label;
+      marker.style.cssText = 'position:absolute;width:24px;height:24px;margin:-12px 0 0 -12px;border:2px solid #fff;' +
+        'border-radius:50%;background:' + color + ';color:#fff;box-shadow:0 1px 5px rgba(0,0,0,.45);' +
+        'font:700 12px/20px system-ui,sans-serif;text-align:center;pointer-events:none';
+      return marker;
+    }
+
+    function demoRouteBounds() {
+      var west = demoRouteCoordinates[0][0];
+      var east = west;
+      var south = demoRouteCoordinates[0][1];
+      var north = south;
+      for (var i = 1; i < demoRouteCoordinates.length; i++) {
+        west = Math.min(west, demoRouteCoordinates[i][0]);
+        east = Math.max(east, demoRouteCoordinates[i][0]);
+        south = Math.min(south, demoRouteCoordinates[i][1]);
+        north = Math.max(north, demoRouteCoordinates[i][1]);
+      }
+      return [west, south, east, north];
+    }
+
+    function syncDemoRoute(fit) {
+      if (showRoute.checked) {
+        if (!demoRoute) {
+          demoRoute = map.addRoute(demoRouteCoordinates, {
+            color: '#1769e0', width: 6, outlineColor: '#fff', outlineWidth: 2.5
+          });
+          routeStartMarker = map.addMarker(demoRouteCoordinates[0], { element: routeMarkerElement('A', '#1769e0') });
+          routeEndMarker = map.addMarker(demoRouteCoordinates[demoRouteCoordinates.length - 1], { element: routeMarkerElement('B', '#d74a27') });
+        }
+        fitRouteButton.textContent = 'Fit example route';
+        if (fit) map.fitBounds(demoRouteBounds(), 56);
+      } else {
+        if (demoRoute) demoRoute.remove();
+        if (routeStartMarker) routeStartMarker.remove();
+        if (routeEndMarker) routeEndMarker.remove();
+        demoRoute = routeStartMarker = routeEndMarker = null;
+        fitRouteButton.textContent = 'Show & fit example route';
+      }
+    }
+
+    function showLocationError(error) {
+      locateButton.disabled = false;
+      locationStatus.hidden = false;
+      var messages = {
+        1: 'Location permission was denied.',
+        2: 'Your location is currently unavailable.',
+        3: 'Finding your location timed out.'
+      };
+      locationStatus.textContent = messages[error && error.code] || 'Your location could not be determined. Use HTTPS or localhost and allow location access.';
+    }
+
+    function showCurrentLocation() {
+      var geolocation = window.navigator && window.navigator.geolocation;
+      if (!geolocation) {
+        showLocationError();
+        return;
+      }
+      locateButton.disabled = true;
+      locationStatus.hidden = false;
+      locationStatus.textContent = 'Finding your current location…';
+      geolocation.getCurrentPosition(function (position) {
+        locateButton.disabled = false;
+        var coords = position && position.coords;
+        var longitude = coords && Number(coords.longitude);
+        var latitude = coords && Number(coords.latitude);
+        if (!isFinite(longitude) || !isFinite(latitude) || latitude < -85.0511287798 || latitude > 85.0511287798) {
+          showLocationError();
+          return;
+        }
+        var point = [longitude, latitude];
+        if (locationMarker) locationMarker.setLonLat(point);
+        else locationMarker = map.addMarker(point, { element: locationElement() });
+        var accuracy = Number(coords.accuracy);
+        locationStatus.textContent = 'Current location shown' + (isFinite(accuracy) ? ' (±' + Math.round(accuracy) + ' m).' : '.');
+        suppressHash = true;
+        map.setView(point);
+        suppressHash = false;
+      }, showLocationError, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+    }
+
+    function headingBetween(previous, next) {
+      var east = (next[0] - previous[0]) * Math.cos((previous[1] + next[1]) * Math.PI / 360);
+      var north = next[1] - previous[1];
+      if (Math.abs(east) + Math.abs(north) < 0.000001) return null;
+      return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+    }
+
+    function configureVectorPreload() {
+      if (!layer) return;
+      layer.setPreload(navigationPreloadEnabled ? {
+        around: 1,
+        zoom: 1,
+        maxTiles: 24,
+        delay: 160
+      } : false);
+    }
+
+    function updateNavigationPreload() {
+      if (!navigationPreloadEnabled) return;
+      var center = map.getCenter();
+      var heading = lastNavigationCenter && headingBetween(lastNavigationCenter, center);
+      var current = map.getNavigation();
+      map.setNavigation({
+        position: center,
+        heading: heading == null ? (current && current.heading != null ? current.heading : 90) : heading,
+        speed: 13.9,
+        lookAhead: 20
+      });
+      lastNavigationCenter = center;
+    }
+
+    var panelStorageKey = 'micromap-vector-demo-panel-collapsed';
+
+    function setPanelCollapsed(collapsed) {
+      panel.classList.toggle('collapsed', collapsed);
+      panelToggle.setAttribute('aria-expanded', String(!collapsed));
+      panelBody.hidden = collapsed;
+      try {
+        if (collapsed) localStorage.setItem(panelStorageKey, '1');
+        else localStorage.removeItem(panelStorageKey);
+      } catch (error) {
+        // Private browsing or a disabled storage API: the toggle still
+        // works for the current page load, it just won't be remembered.
+      }
+    }
+
+    panelToggle.addEventListener('click', function () {
+      setPanelCollapsed(!panel.classList.contains('collapsed'));
+    });
+
+    function updatePreloadControl() {
+      navigationPreloadButton.setAttribute('aria-pressed', String(navigationPreloadEnabled));
+      navigationPreloadButton.textContent = navigationPreloadEnabled ? 'Disable navigation preload' : 'Enable navigation preload';
+      preloadNote.textContent = navigationPreloadEnabled
+        ? 'Warming a bounded ring and detail zoom; pans update the travel direction.'
+        : 'Optional: warms a bounded ring and detail zoom only after visible vector tiles are queued.';
+    }
+
+    function setNavigationPreload(enabled) {
+      navigationPreloadEnabled = !!enabled;
+      if (navigationPreloadEnabled) {
+        lastNavigationCenter = map.getCenter();
+        map.setNavigation({ position: lastNavigationCenter, heading: 90, speed: 13.9, lookAhead: 20 });
+      } else {
+        map.setNavigation(null);
+        lastNavigationCenter = null;
+      }
+      configureVectorPreload();
+      updatePreloadControl();
+    }
+
+    function setSourceInfo(config) {
+      source.textContent = '';
+      sourceDetails.textContent = '';
+      sourceDetailsPanel.open = false;
+      mapAttribution.textContent = '';
+      var attribution = config && config.attribution;
+      if (attribution && attribution.label) {
+        var attributionLink = attribution.href ? document.createElement('a') : document.createElement('span');
+        if (attribution.href) {
+          attributionLink.href = attribution.href;
+          attributionLink.target = '_blank';
+          attributionLink.rel = 'noopener noreferrer';
+        }
+        attributionLink.textContent = attribution.label;
+        mapAttribution.appendChild(attributionLink);
+        mapAttribution.hidden = false;
+      } else {
+        mapAttribution.hidden = true;
+      }
+      var title = document.createElement('strong');
+      title.textContent = config.label;
+      source.appendChild(title);
+      source.appendChild(document.createTextNode(' — ' + (config.summary || (config.kind === 'tilejson' ? 'TileJSON MVT source.' : 'XYZ MVT source.'))));
+      if (config.credit) {
+        var credit = document.createElement('p');
+        credit.textContent = config.credit;
+        sourceDetails.appendChild(credit);
+      }
+      if (useLocalCache) {
+        var cacheNote = document.createElement('p');
+        cacheNote.textContent = 'Local tools/tilecache proxy enabled — repeat requests are served from disk while it is available.';
+        sourceDetails.appendChild(cacheNote);
+      }
+      var endpoint = document.createElement('code');
+      endpoint.className = 'endpoint';
+      endpoint.textContent = config.endpoint;
+      sourceDetails.appendChild(endpoint);
+      if (config.homepage) {
+        var link = document.createElement('a');
+        link.href = config.homepage;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = config.homepageLabel || 'Source details';
+        sourceDetails.appendChild(link);
+      }
+    }
+
+    function attach(nextLayer, config, version) {
+      if (version !== selectionVersion) {
+        nextLayer.destroy();
+        return;
+      }
+      layer = nextLayer;
+      configureVectorPreload();
+      nextLayer.on('tileload', function () {
+        if (version !== selectionVersion) return;
+        loadedTiles++;
+        setStatus(loadedTiles + ' vector tile' + (loadedTiles === 1 ? '' : 's') + ' loaded' + (failedTiles ? '; ' + failedTiles + ' failed.' : '.'), 'ready');
+      });
+      nextLayer.on('tileerror', function (event) {
+        if (version !== selectionVersion) return;
+        failedTiles++;
+        var detail = event && event.error && event.error.message ? ': ' + event.error.message : '.';
+        setStatus(failedTiles + ' vector tile request' + (failedTiles === 1 ? '' : 's') + ' failed' + detail, 'error');
+      });
+    }
+
+    function switchSource(config, view) {
+      var version = ++selectionVersion;
+      loadedTiles = 0;
+      failedTiles = 0;
+      if (layer) {
+        layer.destroy();
+        layer = null;
+      }
+      activeSourceConfig = config;
+      activeStyleFamily = config.styleFamily || 'generic';
+      mapElement.style.background = activeStyleFamily === 'karte-bayern'
+        ? window.microMapKarteBayernBlueStyle({ theme: activeMapStyle }).background : palettes[activeMapStyle].mapBackground;
+      setSourceInfo(config);
+      map.setView(
+        view && view.center ? view.center : (config.center || map.getCenter()),
+        view && view.zoom != null ? view.zoom : (config.zoom == null ? map.getZoom() : config.zoom)
+      );
+      if (view && view.bearing != null) map.setBearing(view.bearing);
+      if (view && view.pitch != null) map.setPitch(view.pitch);
+      setStatus('Loading ' + config.label + '…', 'loading');
+
+      var promise;
+      try {
+        if (config.kind === 'tilejson') {
+          promise = microMapVector.fromTileJSON(map, config.tileJSON, {
+            style: styleForConfig(config),
+            tileBuffer: 1,
+            maxConcurrent: 4,
+            fetch: proxiedFetch
+          });
+        } else {
+          promise = Promise.resolve(microMap.vector(map, {
+            tiles: config.tiles,
+            minZoom: config.minZoom == null ? 0 : config.minZoom,
+            maxZoom: config.maxZoom == null ? 22 : config.maxZoom,
+            style: styleForConfig(config),
+            tileBuffer: 1,
+            maxConcurrent: 4,
+            fetch: proxiedFetch
+          }));
+        }
+      } catch (error) {
+        promise = Promise.reject(error);
+      }
+
+      promise.then(function (nextLayer) {
+        attach(nextLayer, config, version);
+      }, function (error) {
+        if (version !== selectionVersion) return;
+        setStatus('Could not load this vector source: ' + (error && error.message ? error.message : String(error)), 'error');
+      });
+    }
+
+    function customMode() {
+      return isCustomSource(sourcePicker.value);
+    }
+
+    function updateCustomFields() {
+      var isTileJSON = sourcePicker.value === 'custom-tilejson';
+      customFields.hidden = !customMode();
+      customLabel.textContent = isTileJSON ? 'TileJSON URL' : 'XYZ MVT/PBF template';
+      customURL.placeholder = isTileJSON ? '/tiles.json or https://example.test/tiles.json' : '/tiles/{z}/{x}/{y}.mvt or https://example.test/{z}/{x}/{y}.mvt';
+      if (customMode()) {
+        // Keep the current map visible while a URL is being entered, but make
+        // its old layer unable to overwrite the pending-source status.
+        selectionVersion++;
+        setSourceInfo({
+          label: isTileJSON ? 'Custom TileJSON source' : 'Custom XYZ MVT/PBF source',
+          endpoint: 'Enter a same-origin or CORS-enabled URL above.',
+          credit: 'The current map stays visible until this source is loaded; no provider attribution is inferred from a custom endpoint.'
+        });
+        setStatus('Enter a URL and choose Load source. The previous map remains visible until then.', '');
+      }
+    }
+
+    function loadCustomSource(view) {
+      var url = customURL.value.trim();
+      var isTileJSON = sourcePicker.value === 'custom-tilejson';
+      if (!url) {
+        setStatus('Enter a URL before loading a custom source.', 'error');
+        customURL.focus();
+        return;
+      }
+      if (!validCustomURL(url, isTileJSON)) {
+        setStatus('An XYZ template must contain {z}, {x} and {y}.', 'error');
+        customURL.focus();
+        return;
+      }
+      switchSource(customSourceConfig(url, isTileJSON), view);
+    }
+
+    function setHashView(state) {
+      if (state.center || state.zoom != null) {
+        map.setView(state.center || map.getCenter(), state.zoom == null ? map.getZoom() : state.zoom);
+      }
+      if (state.bearing != null) map.setBearing(state.bearing);
+      if (state.pitch != null) map.setPitch(state.pitch);
+    }
+
+    function applyHashState(state) {
+      if (state.source === 'karte-bayern' && !karteBayernAvailable) {
+        setHashView(state);
+        setStatus('Karte.Bayern requires the project GitHub Pages site, the local development proxy, or a Karte.Bayern origin.', 'error');
+        return;
+      }
+      if (sources[state.source]) {
+        sourcePicker.value = state.source;
+        updateCustomFields();
+        switchSource(sources[state.source], state);
+      } else if (isCustomSource(state.source)) {
+        var isTileJSON = state.source === 'custom-tilejson';
+        sourcePicker.value = state.source;
+        customURL.value = state.url || '';
+        updateCustomFields();
+        if (validCustomURL(customURL.value.trim(), isTileJSON)) {
+          switchSource(customSourceConfig(customURL.value.trim(), isTileJSON), state);
+        } else {
+          setHashView(state);
+        }
+      } else {
+        setHashView(state);
+      }
+    }
+
+    sourcePicker.addEventListener('change', function () {
+      updateCustomFields();
+      if (!customMode()) switchSource(sources[sourcePicker.value]);
+      updateHash();
+    });
+    sourceForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (customMode()) loadCustomSource();
+    });
+    customURL.addEventListener('input', updateHash);
+    mapStyleSelect.addEventListener('change', function () {
+      setMapStyle(mapStyleSelect.value);
+      updateHash();
+    });
+    showPoints.addEventListener('change', function () {
+      if (layer) {
+        if (activeSourceConfig && activeSourceConfig.styleFamily === 'karte-bayern') layer.setStyle(styleForConfig(activeSourceConfig));
+        else layer.redraw();
+      }
+      updateHash();
+    });
+    showRoute.addEventListener('change', function () {
+      syncDemoRoute(false);
+      updateHash();
+    });
+    fitRouteButton.addEventListener('click', function () {
+      showRoute.checked = true;
+      syncDemoRoute(true);
+      updateHash();
+    });
+    viewPreset.addEventListener('change', function () {
+      if (viewPreset.value !== 'custom') applyPlayPreset(viewPreset.value);
+      updateHash();
+    });
+    bearingRange.addEventListener('input', function () {
+      viewPreset.value = 'custom';
+      map.setBearing(Number(bearingRange.value));
+      updateHash();
+    });
+    pitchRange.addEventListener('input', function () {
+      viewPreset.value = 'custom';
+      map.setPitch(Number(pitchRange.value));
+      updateHash();
+    });
+    buildingModeSelect.addEventListener('change', function () {
+      setBuildingMode(buildingModeSelect.value);
+      updateHash();
+    });
+    buildingHeightInput.addEventListener('input', function () {
+      setBuildingHeight(buildingHeightInput.value);
+      updateHash();
+    });
+    autoOrbit.addEventListener('change', function () { setOrbit(autoOrbit.checked); });
+    resetPlayground.addEventListener('click', function () {
+      stopOrbit();
+      viewPreset.value = 'custom';
+      setBuildingMode('3d');
+      setBuildingHeight(10);
+      map.setBearing(0).setPitch(0);
+      updateCameraControls();
+      updateHash();
+    });
+    navigationPreloadButton.addEventListener('click', function () {
+      setNavigationPreload(!navigationPreloadEnabled);
+      updateHash();
+    });
+    northButton.addEventListener('click', function () { map.setBearing(0); });
+    rotateLeftButton.addEventListener('click', function () { map.setBearing(map.getBearing() - 15); });
+    rotateRightButton.addEventListener('click', function () { map.setBearing(map.getBearing() + 15); });
+    pitchDownButton.addEventListener('click', function () { map.setPitch(map.getPitch() - 10); });
+    pitchUpButton.addEventListener('click', function () { map.setPitch(map.getPitch() + 10); });
+    locateButton.addEventListener('click', showCurrentLocation);
+    map.on('moveend', updateNavigationPreload);
+    map.on('moveend', updateHash);
+    map.on('rotate', updateCameraControls).on('pitch', updateCameraControls).on('zoom', updateCameraControls).on('destroy', stopOrbit);
+    window.addEventListener('hashchange', function () {
+      restoringHash = true;
+      var nextState = readHashState();
+      showPoints.checked = nextState.points;
+      showRoute.checked = nextState.route;
+      syncDemoRoute(false);
+      setMapStyle(nextState.style || 'warm');
+      setBuildingMode(nextState.buildings);
+      setBuildingHeight(nextState.buildingHeight || 10);
+      setNavigationPreload(nextState.preload);
+      applyHashState(nextState);
+      restoringHash = false;
+      updateCameraControls();
+    });
+
+    setMapStyle(initialHashState.style || 'warm');
+    setBuildingMode(initialHashState.buildings);
+    setBuildingHeight(initialHashState.buildingHeight || 10);
+
+    // Keep the earlier query-string workflow available for easy links to a
+    // local service: ?tilejson=/tiles.json or ?tiles=/tiles/{z}/{x}/{y}.mvt.
+    var params = new URLSearchParams(location.search);
+    if ((sources[initialHashState.source] && (initialHashState.source !== 'karte-bayern' || karteBayernAvailable)) || isCustomSource(initialHashState.source)) {
+      applyHashState(initialHashState);
+    } else if (params.get('tilejson')) {
+      sourcePicker.value = 'custom-tilejson';
+      customURL.value = params.get('tilejson');
+      updateCustomFields();
+      loadCustomSource(initialHashState);
+    } else if (params.get('tiles')) {
+      sourcePicker.value = 'custom-xyz';
+      customURL.value = params.get('tiles');
+      updateCustomFields();
+      loadCustomSource(initialHashState);
+    } else {
+      var initial = params.get('source');
+      if (!sources[initial] || (initial === 'karte-bayern' && !karteBayernAvailable)) initial = 'offline-mvt';
+      sourcePicker.value = initial;
+      updateCustomFields();
+      switchSource(sources[initial], initialHashState);
+    }
+    setNavigationPreload(initialHashState.preload);
+    syncDemoRoute(false);
+    updateCameraControls();
+    updateHash();
+    var panelWasCollapsed = false;
+    try {
+      panelWasCollapsed = localStorage.getItem(panelStorageKey) === '1';
+    } catch (error) {
+      // Private browsing or a disabled storage API: default to expanded.
+    }
+    setPanelCollapsed(panelWasCollapsed);
+  </script>
+</body>
+</html>

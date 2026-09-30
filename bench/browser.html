@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>MicroMap preview</title>
+  <style>
+    :root {
+      --bg: #f3f1ea; --panel: rgba(255, 255, 255, .94); --text: #1f2933; --muted: #64707d; --line: #d9dde2;
+      --accent: #1769e0; --accent-text: #fff; --chip: #eef1f4; --good: #1f7a3d; --warn: #a15c00; --bad: #b42318;
+      --shadow: 0 2px 10px rgba(0, 0, 0, .18);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --panel: rgba(24, 28, 34, .94); --text: #e6e9ed; --muted: #9aa5b1; --line: #36404c; --accent: #5b9bff;
+        --chip: #2b333d; --good: #5fd08a; --warn: #f0b35a; --bad: #ff8a80; --shadow: 0 2px 12px rgba(0, 0, 0, .5);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font: 13px/1.4 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+    #map { position: absolute; inset: 0; }
+    #map.rotating { cursor: grabbing; }
+    button, select, input { font: inherit; color: inherit; }
+    select { background: var(--chip); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; max-width: 62%; }
+    button { border: 1px solid var(--line); background: var(--chip); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+    button:disabled { opacity: .5; cursor: default; }
+    a { color: var(--accent); }
+
+    #panel { position: absolute; top: 10px; left: 10px; z-index: 20; width: 320px; max-height: calc(100% - 20px);
+      display: flex; flex-direction: column; background: var(--panel); border-radius: 10px; box-shadow: var(--shadow);
+      backdrop-filter: blur(6px); }
+    #panel header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+    #panel header strong { flex: 1; font-size: 14px; }
+    #panel .body { overflow: auto; padding: 4px 12px 12px; }
+    #panel.collapsed .body { display: none; }
+    #panel.collapsed header { border-bottom: 0; }
+    #toggle { padding: 2px 8px; }
+    #subtitle { color: var(--muted); font-size: 11px; padding: 6px 0 2px; }
+    details { border-bottom: 1px solid var(--line); padding: 6px 0; }
+    details:last-child { border-bottom: 0; }
+    summary { cursor: pointer; font-weight: 600; padding: 3px 0; list-style: none; display: flex; justify-content: space-between; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: '+'; color: var(--muted); }
+    details[open] summary::after { content: '−'; }
+    .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .row label { flex: 1; }
+    .row output { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+    input[type="range"] { flex: 2; accent-color: var(--accent); }
+    input[type="checkbox"] { accent-color: var(--accent); }
+    .places { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+    .hint { color: var(--muted); font-size: 11px; margin: 4px 0; }
+    #layer-filter { width: 100%; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; margin: 6px 0; }
+    #layers { max-height: 260px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+    #layers li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+    #layers li label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+    .stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0; font-variant-numeric: tabular-nums; }
+    .stats dt { color: var(--muted); }
+    .stats dd { margin: 0; text-align: right; }
+    .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+    pre { margin: 6px 0 0; white-space: pre-wrap; font-size: 11px; max-height: 220px; overflow: auto; background: var(--chip);
+      border-radius: 6px; padding: 6px; }
+    pre:empty { display: none; }
+
+    #status { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 15; padding: 3px 10px;
+      border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); font-size: 11px; font-variant-numeric: tabular-nums;
+      white-space: nowrap; pointer-events: none; }
+    #loading { position: absolute; left: 0; top: 0; height: 3px; width: 100%; z-index: 30; background: var(--accent);
+      transform-origin: left; transform: scaleX(0); transition: transform .2s, opacity .4s; opacity: 0; }
+    #loading.active { opacity: 1; }
+    #kb-attribution { position: absolute; right: 8px; bottom: 32px; z-index: 14; max-width: min(750px, calc(100% - 16px));
+      max-height: 22vh; overflow: auto; padding: 4px 7px; background: var(--panel); box-shadow: var(--shadow); font-size: 11px; }
+    #kb-attribution[hidden] { display: none; }
+
+    .inspect { font-size: 12px; max-height: 260px; overflow: auto; }
+    .inspect h4 { margin: 6px 0 2px; font-size: 12px; }
+    .inspect h4:first-child { margin-top: 0; padding-right: 22px; }
+    .inspect table { border-collapse: collapse; width: 100%; }
+    .inspect td { padding: 1px 4px; vertical-align: top; border-top: 1px solid rgba(127, 127, 127, .2); word-break: break-word; }
+    .inspect td:first-child { color: #64707d; white-space: nowrap; }
+
+    @media (max-width: 640px) {
+      #panel { top: auto; bottom: 0; left: 0; width: 100%; max-height: 55%; border-radius: 12px 12px 0 0; }
+      #status { bottom: auto; top: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="loading"></div>
+  <div id="status">loading…</div>
+  <aside id="kb-attribution" aria-label="Karte.Bayern aerial imagery attribution" hidden></aside>
+  <aside id="panel" aria-label="MicroMap preview controls">
+    <header>
+      <strong id="title">MicroMap preview</strong>
+      <button id="toggle" type="button" aria-expanded="true" title="Collapse panel">−</button>
+    </header>
+    <div class="body">
+      <div id="subtitle">starting…</div>
+      <div class="row"><label for="source-select">Tiles</label><select id="source-select">
+        <option value="auto">Auto (local / Karte.Bayern)</option>
+        <option value="karte-bayern">Karte.Bayern MVT + aerial</option>
+        <option value="openfreemap">OpenFreeMap</option>
+      </select></div>
+      <div class="row" id="kb-style-row" hidden><label for="kb-style">Karte.Bayern style</label><select id="kb-style">
+        <option value="warm">Warm</option><option value="light">Light</option><option value="dark">Dark</option>
+        <option value="night">Night</option><option value="contrast">High contrast</option>
+      </select></div>
+
+      <details open>
+        <summary>Places</summary>
+        <div class="places" id="places"></div>
+        <div class="hint">Right-drag or Ctrl-drag rotates and tilts, as do two fingers and Shift+arrow keys. The camera is kept in the URL hash.</div>
+      </details>
+
+      <details open>
+        <summary>View</summary>
+        <div class="row"><label for="pitch">Pitch</label><input id="pitch" type="range" min="0" max="60" step="1"><output id="pitch-value"></output></div>
+        <div class="row"><label for="bearing">Bearing</label><input id="bearing" type="range" min="-180" max="180" step="1"><output id="bearing-value"></output></div>
+        <div class="row"><label><input id="buildings" type="checkbox"> 3D buildings</label><button id="tilt" type="button" title="Tilt for 3D">Tilt</button><button id="north" type="button" title="Reset bearing and pitch">Reset</button></div>
+        <div class="row"><label><input id="labels" type="checkbox" checked> Labels</label><label><input id="raster" type="checkbox"> Aerial / raster</label></div>
+        <div class="row"><label title="Enforce symbol collisions for a less crowded preview."><input id="label-collisions" type="checkbox" checked> Prevent label overlap</label></div>
+        <div class="row"><label><input id="inspect" type="checkbox" checked> Inspect features on click</label></div>
+      </details>
+
+      <details>
+        <summary>Layers <span class="badge" id="layer-count"></span></summary>
+        <input id="layer-filter" type="search" placeholder="Filter layers…" aria-label="Filter layers">
+        <ul id="layers"></ul>
+      </details>
+
+      <details open>
+        <summary>Performance</summary>
+        <dl class="stats">
+          <dt>Frame rate</dt><dd id="fps">–</dd>
+          <dt>Map JS / frame</dt><dd id="frame-ms">–</dd>
+          <dt>Tiles</dt><dd id="tiles">–</dd>
+          <dt>Renderer</dt><dd id="renderer-info">–</dd>
+        </dl>
+        <div class="row">
+          <button id="run" type="button" class="primary" disabled>Run pan + zoom bench</button>
+          <button id="copy" type="button" disabled>Copy</button>
+        </div>
+        <pre id="result"></pre>
+        <div class="row hint">
+          <a id="sync" href="#">sync raster</a>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <script>
+    // Every animation-frame callback the map schedules is timed here; with
+    // ?sync=1 the vector canvas is read back afterwards, which forces the
+    // browser to rasterise the frame inside the measurement. A small ring of
+    // the latest samples feeds the live panel.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var nativeFrame = window.requestAnimationFrame.bind(window);
+      var bench = window.__bench = { samples: null, sync: params.get('sync') === '1', canvas: null, live: [], liveTimes: [] };
+      window.requestAnimationFrame = function (callback) {
+        return nativeFrame(function (time) {
+          var start = performance.now();
+          callback(time);
+          if (bench.sync && bench.canvas) bench.canvas.getContext('2d').getImageData(0, 0, 1, 1);
+          if (callback.__benchDriver) return;
+          var spent = performance.now() - start;
+          if (bench.samples) bench.samples.push(spent);
+          bench.live.push(spent);
+          bench.liveTimes.push(time);
+          if (bench.live.length > 120) { bench.live.shift(); bench.liveTimes.shift(); }
+        });
+      };
+    }());
+  </script>
+  <script src="../lib/microMap.js"></script>
+  <script src="../lib/microMap.vector.js"></script>
+  <script src="../lib/microMap.camera.js"></script>
+  <script src="../lib/microMap.compose.js"></script>
+  <script src="../lib/microMap.ui.js"></script>
+  <script src="../styles/karte-bayern-blue.js"></script>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var $ = function (id) { return document.getElementById(id); };
+      var output = $('result');
+
+      // Camera: #zoom/lat/lon/bearing/pitch (MapLibre's hash format) wins
+      // over ?lon=&lat=&zoom=&bearing=&pitch=.
+      var hash = location.hash.slice(1).split('/').map(Number);
+      var hashValid = hash.length >= 3 && hash.every(isFinite);
+      var lon = hashValid ? hash[2] : +(params.get('lon') || 11.575);
+      var lat = hashValid ? hash[1] : +(params.get('lat') || 48.137);
+      var zoom = hashValid ? hash[0] : +(params.get('zoom') || 13.4);
+      var bearing = hashValid && hash.length > 3 ? hash[3] : +(params.get('bearing') || 0);
+      var pitch = hashValid && hash.length > 4 ? hash[4] : +(params.get('pitch') || 0);
+      var frames = +(params.get('frames') || 120);
+      var styleParam = params.get('style');
+      var sourceChoice = /^(karte-bayern|openfreemap)$/.test(params.get('source')) ? params.get('source') : 'auto';
+      var kbTheme = /^(warm|light|dark|night|contrast)$/.test(params.get('kbtheme')) ? params.get('kbtheme') : 'warm';
+      var KB_ORIGIN = 'https://karte.bayern';
+      var KB_AERIAL_SOURCE = 'kb-aerial';
+      var KB_AERIAL_LAYER = 'kb-aerial-layer';
+      var kbNotices = [];
+      var kbTileCredits = Object.create(null);
+      var kbAerialError = '';
+
+      var PLACES = [
+        { name: 'Bayern', center: [11.4, 48.95], zoom: 6.6 },
+        { name: 'München', center: [11.5755, 48.1374], zoom: 16.2, pitch: 55, bearing: -25 },
+        { name: 'Nürnberg', center: [11.0775, 49.4545], zoom: 16, pitch: 50, bearing: 20 },
+        { name: 'Regensburg', center: [12.0977, 49.0195], zoom: 16, pitch: 50, bearing: -15 },
+        { name: 'Würzburg', center: [9.9385, 49.7930], zoom: 15.6, pitch: 45 },
+        { name: 'Augsburg', center: [10.8978, 48.3689], zoom: 15.8, pitch: 45, bearing: 10 },
+        { name: 'Zugspitze', center: [10.985, 47.421], zoom: 12.5, pitch: 40, bearing: 160 }
+      ];
+
+      // MapLibre styles use MapLibre zoom levels (512px world); match them.
+      // The tile size is decided once the style is known, so the base map is
+      // created afterwards.
+      var settings = {
+        tiles: '/tiles/{z}/{x}/{y}.pbf', minZoom: 5, maxZoom: 14,
+        maxFeatures: 100000, maxConcurrent: 8, maxCacheBytes: 64 * 1024 * 1024,
+        maxDpr: params.get('maxDpr') ? +params.get('maxDpr') : undefined
+      };
+      var map = null;
+      var view = null;
+      var vectors = null;
+      var styleKind = 'profile';
+      var lastEvent = performance.now();
+      var loaded = 0;
+      var failed = 0;
+
+      // Without the local bench server (for example on GitHub Pages) the
+      // preview falls back to OpenFreeMap's public "Liberty" style.
+      var PUBLIC_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+      var localKBProxy = /^(127\.0\.0\.1|localhost|\[?::1\]?)$/i.test(location.hostname);
+
+      function kbResourceURL(url) {
+        var target = new URL(url, KB_ORIGIN);
+        if (target.origin !== KB_ORIGIN) throw new Error('unexpected Karte.Bayern source origin');
+        var template = target.href.replace(/%7B/gi, '{').replace(/%7D/gi, '}');
+        return localKBProxy ? '/fetch?u=' + encodeURIComponent(template).replace(/%7B/gi, '{').replace(/%7D/gi, '}') : template;
+      }
+
+      function kbFetch(url, init) {
+        try {
+          return fetch(kbResourceURL(url), init);
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+
+      function kbTileJSON() {
+        return kbFetch(KB_ORIGIN + '/tilejson.json').then(function (response) {
+          if (!response.ok) throw new Error('Karte.Bayern TileJSON unavailable (' + response.status + '). Check the public map service or use `make bench` locally.');
+          return response.json();
+        }).then(function (tileJSON) {
+          var contract = window.microMapKarteBayernBlueStyle.validateTileJSON(tileJSON);
+          if (!contract.valid) throw new Error('Karte.Bayern TileJSON is incompatible: ' + contract.errors.join(' '));
+          return { kind: 'karte-bayern', tileJSON: tileJSON };
+        });
+      }
+
+      function fetchStyle(url) {
+        return fetch(url).then(function (response) {
+          if (!response.ok) throw new Error('style request failed (' + response.status + ')');
+          return response.json();
+        });
+      }
+
+      function loadStyle() {
+        if (sourceChoice === 'karte-bayern') return kbTileJSON();
+        if (sourceChoice === 'openfreemap') {
+          styleKind = 'openfreemap';
+          return fetchStyle(PUBLIC_STYLE);
+        }
+        if (styleParam === 'blue') return Promise.resolve(null);
+        if (styleParam === 'openfreemap') {
+          styleKind = 'openfreemap';
+          return fetchStyle(PUBLIC_STYLE);
+        }
+        if (styleParam) return fetchStyle(styleParam);
+        return (localKBProxy ? fetch('/style.json') : Promise.reject(new Error('no local style'))).then(function (response) {
+          if (!response.ok) throw new Error('no local style');
+          return response.json();
+        }).catch(function () {
+          return kbTileJSON().catch(function () {
+            return fetchStyle(PUBLIC_STYLE).then(function (style) {
+              styleKind = 'openfreemap';
+              return style;
+            });
+          });
+        });
+      }
+
+      function attach(layer) {
+        vectors = layer;
+        window.__bench.canvas = vectors.getCanvas();
+        window.benchVectors = vectors;
+        vectors.on('tileload', function (event) {
+          loaded++;
+          lastEvent = performance.now();
+          if (styleKind !== 'karte-bayern' || !event || !event.raster || event.source !== KB_AERIAL_SOURCE) return;
+          var tileURL = KB_ORIGIN + '/sat/' + event.z + '/' + event.x + '/' + event.y + '?fmt=webp';
+          kbFetch(tileURL, { method: 'HEAD', cache: 'no-store' }).then(function (response) {
+            if (!response.ok) return;
+            var credit = response.headers.get('X-KB-Imagery-Attribution');
+            if (credit && !kbTileCredits[credit]) {
+              kbTileCredits[credit] = true;
+              renderKBAttribution();
+            }
+          }).catch(function () {});
+        });
+        vectors.on('tileerror', function () { failed++; lastEvent = performance.now(); });
+      }
+
+      function renderKBAttribution() {
+        var node = $('kb-attribution');
+        node.hidden = styleKind !== 'karte-bayern' || !$('raster').checked;
+        if (node.hidden) return;
+        node.textContent = 'Imagery: ';
+        kbNotices.forEach(function (notice, index) {
+          if (index) node.appendChild(document.createTextNode(' · '));
+          node.appendChild(document.createTextNode(notice.attribution));
+          if (notice.license_url && /^https?:\/\//.test(notice.license_url)) {
+            var license = document.createElement('a');
+            license.href = notice.license_url;
+            license.textContent = ' [license]';
+            license.target = '_blank';
+            license.rel = 'license noopener noreferrer';
+            node.appendChild(license);
+          }
+        });
+        Object.keys(kbTileCredits).forEach(function (credit) {
+          node.appendChild(document.createTextNode(' · ' + credit));
+        });
+      }
+
+      function loadKBAerial() {
+        return kbFetch(KB_ORIGIN + '/api/orthophoto/sources?scope=runtime', { cache: 'no-store' }).then(function (response) {
+          if (!response.ok) throw new Error('imagery source contract unavailable');
+          return response.json();
+        }).then(function (data) {
+          if (!data || !Array.isArray(data.sources) || !data.sources.length || data.sources.some(function (notice) { return !notice.attribution; })) {
+            throw new Error('imagery source contract incomplete');
+          }
+          kbNotices = data.sources;
+          var template = kbResourceURL(KB_ORIGIN + '/sat/{z}/{x}/{y}?fmt=webp');
+          vectors.addSource(KB_AERIAL_SOURCE, { type: 'raster', tiles: [template], tileSize: 256, minzoom: 0, maxzoom: 19 });
+          var firstLabel = layers().find(function (layer) { return layer.type === 'symbol'; });
+          vectors.addLayer({ id: KB_AERIAL_LAYER, type: 'raster', source: KB_AERIAL_SOURCE,
+            layout: { visibility: 'none' }, paint: { 'raster-opacity': 1 } }, firstLabel && firstLabel.id);
+          if ((params.get('show') || '').split(',').indexOf(KB_AERIAL_LAYER) >= 0) {
+            vectors.setLayoutProperty(KB_AERIAL_LAYER, 'visibility', 'visible');
+          }
+        });
+      }
+
+      var ready = loadStyle().then(function (style) {
+        var karteBayernStyle = style && style.kind === 'karte-bayern';
+        map = microMap('#map', {
+          tiles: false, center: [lon, lat], zoom: zoom, minZoom: 5, maxZoom: 20, zoomAnimation: false,
+          tileSize: style && !karteBayernStyle ? 512 : 256, bearing: bearing, pitch: pitch
+        });
+        window.benchMap = map;
+        if (karteBayernStyle) {
+          styleKind = 'karte-bayern';
+          var kbProfile = window.microMapKarteBayernBlueStyle({ theme: kbTheme, extrudeBuildings: true });
+          $('map').style.background = kbProfile.background;
+          settings.style = kbProfile;
+          settings.tiles = style.tileJSON.tiles[0];
+          settings.minZoom = style.tileJSON.minzoom;
+          settings.maxZoom = style.tileJSON.maxzoom;
+          settings.tileJSON = style.tileJSON;
+          settings.fetch = kbFetch;
+          attach(microMapVector(map, settings));
+          return loadKBAerial().catch(function (error) {
+            kbAerialError = String(error && error.message || error);
+          });
+        }
+        if (style) {
+          if (styleKind !== 'openfreemap') styleKind = 'maplibre';
+          settings.strict = false;
+          // A public style brings its own tile source and zoom range.
+          if (styleKind === 'openfreemap') {
+            delete settings.tiles;
+            delete settings.minZoom;
+            delete settings.maxZoom;
+          }
+          return microMapVector.fromStyle(map, style, settings).then(function (layer) {
+            attach(layer);
+            // ?show=a,b makes hidden style layers (for example satellite) visible.
+            (params.get('show') || '').split(',').filter(Boolean).forEach(function (id) { layer.setLayoutProperty(id, 'visibility', 'visible'); });
+          });
+        }
+        var profile = window.microMapKarteBayernBlueStyle({ theme: kbTheme });
+        $('map').style.background = profile.background;
+        settings.style = profile;
+        attach(microMapVector(map, settings));
+      }).then(function () {
+        view = microMapCompose(map, { camera: true, vectors: [vectors] });
+        window.benchView = view;
+        setupUI();
+      });
+      ready.catch(function (error) {
+        $('subtitle').textContent = String(error && error.message || error);
+        $('subtitle').className = 'bad';
+      });
+
+      // ---- Panel ---------------------------------------------------------
+
+      function layers() {
+        return vectors && typeof vectors.getLayers === 'function' ? vectors.getLayers() : [];
+      }
+
+      function visible(layer) {
+        return !(layer.layout && layer.layout.visibility === 'none');
+      }
+
+      var originalLabelPlacement = Object.create(null);
+      function applyLabelCollisionSetting(enabled) {
+        if (!vectors || typeof vectors.setLayoutProperty !== 'function' || typeof vectors.getLayoutProperty !== 'function') return;
+        layers().forEach(function (layer) {
+          if (layer.type !== 'symbol' || !layer.id || vectors.getLayoutProperty(layer.id, 'text-field') == null) return;
+          if (!Object.prototype.hasOwnProperty.call(originalLabelPlacement, layer.id)) {
+            originalLabelPlacement[layer.id] = {
+              allowOverlap: vectors.getLayoutProperty(layer.id, 'text-allow-overlap'),
+              ignorePlacement: vectors.getLayoutProperty(layer.id, 'text-ignore-placement')
+            };
+          }
+          var original = originalLabelPlacement[layer.id];
+          vectors.setLayoutProperty(layer.id, 'text-allow-overlap', enabled ? false : original.allowOverlap);
+          vectors.setLayoutProperty(layer.id, 'text-ignore-placement', enabled ? false : original.ignorePlacement);
+        });
+      }
+
+      function setVisibility(ids, show) {
+        if (typeof vectors.setLayoutProperty !== 'function') return;
+        ids.forEach(function (id) { vectors.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'); });
+        renderLayers();
+      }
+
+      function idsWhere(test) {
+        return layers().filter(test).map(function (layer) { return layer.id; }).filter(Boolean);
+      }
+
+      function syncToggles() {
+        var all = layers();
+        var extrusions = all.filter(function (layer) { return layer.type === 'fill-extrusion'; });
+        var rasters = all.filter(function (layer) { return layer.type === 'raster'; });
+        var symbols = all.filter(function (layer) { return layer.type === 'symbol'; });
+        $('buildings').disabled = !extrusions.length;
+        $('buildings').checked = extrusions.some(visible);
+        $('raster').disabled = !rasters.length;
+        $('raster').checked = rasters.some(visible);
+        $('labels').disabled = !symbols.length;
+        $('labels').checked = symbols.some(visible);
+        $('label-collisions').disabled = typeof vectors.getLayoutProperty !== 'function' || typeof vectors.setLayoutProperty !== 'function' || !symbols.some(function (layer) {
+          return layer.id && vectors.getLayoutProperty(layer.id, 'text-field') != null;
+        });
+      }
+
+      function renderLayers() {
+        var list = $('layers');
+        var filter = $('layer-filter').value.trim().toLowerCase();
+        var all = layers();
+        list.textContent = '';
+        var shown = 0;
+        all.forEach(function (layer, index) {
+          var id = layer.id || layer.type + '-' + index;
+          if (filter && id.toLowerCase().indexOf(filter) < 0 && String(layer.type).indexOf(filter) < 0) return;
+          shown++;
+          var item = document.createElement('li');
+          var label = document.createElement('label');
+          var box = document.createElement('input');
+          box.type = 'checkbox';
+          box.checked = visible(layer);
+          box.disabled = !layer.id || typeof vectors.setLayoutProperty !== 'function';
+          box.onchange = function () { setVisibility([layer.id], box.checked); syncToggles(); };
+          label.append(box, ' ' + id);
+          label.title = id;
+          var badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = layer.type;
+          item.append(label, badge);
+          list.appendChild(item);
+        });
+        $('layer-count').textContent = (filter ? shown + ' / ' : '') + all.length;
+      }
+
+      function setupUI() {
+        var ui = window.microMapUI;
+        $('source-select').value = sourceChoice;
+        $('kb-style-row').hidden = styleKind !== 'karte-bayern' && styleKind !== 'profile';
+        $('kb-style').value = kbTheme;
+        $('kb-style').onchange = function () {
+          var next = new URL(location.href);
+          if (this.value === 'warm') next.searchParams.delete('kbtheme');
+          else next.searchParams.set('kbtheme', this.value);
+          location.assign(next.pathname + next.search + next.hash);
+        };
+        $('source-select').onchange = function () {
+          var next = new URL(location.href);
+          if (this.value === 'auto') next.searchParams.delete('source');
+          else next.searchParams.set('source', this.value);
+          next.searchParams.delete('style');
+          next.searchParams.delete('show');
+          location.assign(next.pathname + next.search + next.hash);
+        };
+        view.addControl(new ui.NavigationControl({ showCompass: true, visualizePitch: true }), 'top-right');
+        view.addControl(new ui.GeolocateControl(), 'top-right');
+        view.addControl(new ui.ScaleControl({ maxWidth: 110 }), 'bottom-left');
+        view.addControl(new ui.AttributionControl({ compact: true, customAttribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>' }), 'bottom-right');
+
+        var report = typeof vectors.getStyleReport === 'function' ? vectors.getStyleReport() : null;
+        $('title').textContent = 'MicroMap preview';
+        $('subtitle').textContent = (styleKind === 'openfreemap' ? 'OpenFreeMap Liberty (MapLibre style)' : styleKind === 'maplibre' ? 'MapLibre style' : styleKind === 'karte-bayern' ? 'Karte.Bayern MVT' : 'Reference vector style') + ' · MicroMap renderer' +
+          (window.__bench.sync ? ' · sync raster' : '') +
+          (kbAerialError ? ' · aerial unavailable: ' + kbAerialError : '') +
+          (report ? ' · ' + report.approximated.length + ' approximated, ' + report.ignored.length + ' ignored, ' + report.skippedLayers.length + ' skipped' : '');
+        $('renderer-info').textContent = 'Canvas, dpr ' + devicePixelRatio + (settings.maxDpr ? ' (max ' + settings.maxDpr + ')' : '');
+
+        PLACES.forEach(function (place) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = place.name;
+          button.onclick = function () {
+            view.flyTo({ center: place.center, zoom: place.zoom, pitch: place.pitch || 0, bearing: place.bearing || 0, essential: true });
+          };
+          $('places').appendChild(button);
+        });
+
+        $('pitch').oninput = function () { map.setPitch(+this.value); };
+        $('bearing').oninput = function () { map.setBearing(+this.value); };
+        $('north').onclick = function () { view.easeTo({ bearing: 0, pitch: 0, duration: 400 }); };
+        $('tilt').onclick = function () {
+          if (!$('buildings').checked && !$('buildings').disabled) { setVisibility(idsWhere(function (layer) { return layer.type === 'fill-extrusion'; }), true); syncToggles(); }
+          view.easeTo({ pitch: 55, zoom: Math.max(map.getZoom(), 15.5), duration: 700 });
+        };
+        $('buildings').onchange = function () {
+          setVisibility(idsWhere(function (layer) { return layer.type === 'fill-extrusion'; }), this.checked);
+          if (this.checked && map.getPitch() < 20 && !view.isEasing()) view.easeTo({ pitch: 50, duration: 600 });
+        };
+        $('labels').onchange = function () { setVisibility(idsWhere(function (layer) { return layer.type === 'symbol'; }), this.checked); };
+        $('label-collisions').onchange = function () { applyLabelCollisionSetting(this.checked); };
+        $('raster').onchange = function () {
+          setVisibility(idsWhere(function (layer) { return layer.type === 'raster'; }), this.checked);
+          renderKBAttribution();
+        };
+        $('layer-filter').oninput = renderLayers;
+        function collapse(collapsed) {
+          $('panel').classList.toggle('collapsed', collapsed);
+          $('toggle').textContent = collapsed ? '+' : '−';
+          $('toggle').setAttribute('aria-expanded', String(!collapsed));
+        }
+        $('toggle').onclick = function () { collapse(!$('panel').classList.contains('collapsed')); };
+        // On a phone the sheet would cover half the map: start it collapsed.
+        if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) collapse(true);
+
+        syncToggles();
+        renderKBAttribution();
+        applyLabelCollisionSetting($('label-collisions').checked);
+        renderLayers();
+        setupInspect();
+        map.on('move', updateCamera).on('rotate', updateCamera).on('pitch', updateCamera).on('moveend', saveCamera);
+        updateCamera();
+        setInterval(updateStats, 400);
+
+        $('run').onclick = run;
+        $('copy').onclick = function () {
+          if (navigator.clipboard && window.benchResult) navigator.clipboard.writeText(JSON.stringify(window.benchResult, null, 1));
+        };
+        ready.then(idle).then(function () {
+          // The first frames lay out the whole style; keep them out of the live figures.
+          window.__bench.live.length = window.__bench.liveTimes.length = 0;
+          $('run').disabled = false;
+          if (params.get('run') === '1') run();
+        });
+      }
+
+      // ---- Camera readout, hash and links ---------------------------------
+
+      function cameraText() {
+        var center = map.getCenter();
+        return map.getZoom().toFixed(2) + '/' + center[1].toFixed(5) + '/' + center[0].toFixed(5) + '/' +
+          Math.round(signedBearing()) + '/' + Math.round(map.getPitch ? map.getPitch() : 0);
+      }
+
+      // The core keeps bearing in [0, 360); show it like MapLibre, in ±180.
+      function signedBearing() {
+        var value = map.getBearing ? map.getBearing() : 0;
+        return value > 180 ? value - 360 : value;
+      }
+
+      function updateCamera() {
+        var center = map.getCenter();
+        var currentPitch = map.getPitch ? map.getPitch() : 0;
+        var currentBearing = signedBearing();
+        $('status').textContent = 'z ' + map.getZoom().toFixed(2) + ' · ' + center[1].toFixed(4) + ', ' + center[0].toFixed(4) +
+          ' · bearing ' + Math.round(currentBearing) + '° · pitch ' + Math.round(currentPitch) + '°';
+        if (document.activeElement !== $('pitch')) $('pitch').value = currentPitch;
+        if (document.activeElement !== $('bearing')) $('bearing').value = currentBearing;
+        $('pitch-value').textContent = Math.round(currentPitch) + '°';
+        $('bearing-value').textContent = Math.round(currentBearing) + '°';
+      }
+
+      function saveCamera() {
+        history.replaceState(null, '', '#' + cameraText());
+        var sync = new URLSearchParams(location.search);
+        if (window.__bench.sync) sync.delete('sync'); else sync.set('sync', '1');
+        $('sync').href = '?' + sync.toString();
+        $('sync').textContent = window.__bench.sync ? 'async raster' : 'sync raster';
+      }
+
+      // ---- Live performance -------------------------------------------------
+
+      function updateStats() {
+        var bench = window.__bench;
+        var times = bench.liveTimes;
+        var now = performance.now();
+        // Frames of the last second in which the map actually drew.
+        var recent = 0;
+        for (var i = times.length - 1; i >= 0 && now - times[i] < 1000; i--) recent++;
+        var intervals = [];
+        for (i = Math.max(1, times.length - recent); i < times.length; i++) if (times[i] - times[i - 1] < 100) intervals.push(times[i] - times[i - 1]);
+        if (intervals.length > 4) {
+          var mean = intervals.reduce(function (sum, value) { return sum + value; }, 0) / intervals.length;
+          var fps = 1000 / mean;
+          $('fps').textContent = fps.toFixed(0) + ' fps';
+          $('fps').className = fps >= 50 ? 'good' : fps >= 30 ? 'warn' : 'bad';
+        } else {
+          $('fps').textContent = 'idle';
+          $('fps').className = '';
+        }
+        var live = bench.live.slice(-60).sort(function (a, b) { return a - b; });
+        if (live.length) {
+          var p50 = live[Math.floor(live.length / 2)];
+          var p95 = live[Math.floor(live.length * 0.95)];
+          $('frame-ms').textContent = p50.toFixed(1) + ' ms p50 · ' + p95.toFixed(1) + ' ms p95';
+          $('frame-ms').className = p95 < 8 ? 'good' : p95 < 16 ? 'warn' : 'bad';
+        }
+        $('tiles').textContent = loaded + ' loaded' + (failed ? ', ' + failed + ' errors' : '');
+        var busy = now - lastEvent < 400;
+        $('loading').classList.toggle('active', busy);
+        $('loading').style.transform = 'scaleX(' + (busy ? 0.7 : 1) + ')';
+      }
+
+      // ---- Feature inspection ---------------------------------------------
+
+      var popup = null;
+      var hoverPending = false;
+
+      function inspectContent(features) {
+        var root = document.createElement('div');
+        root.className = 'inspect';
+        var seen = 0;
+        features.slice(0, 4).forEach(function (feature) {
+          var heading = document.createElement('h4');
+          heading.textContent = (feature.layer && feature.layer.id) + ' · ' + (feature.sourceLayer || feature.source || '') + ' · ' + (feature.geometry && feature.geometry.type);
+          var table = document.createElement('table');
+          var properties = feature.properties || {};
+          Object.keys(properties).slice(0, 14).forEach(function (key) {
+            var row = table.insertRow();
+            row.insertCell().textContent = key;
+            row.insertCell().textContent = String(properties[key]);
+          });
+          if (feature.id != null) {
+            var idRow = table.insertRow();
+            idRow.insertCell().textContent = 'id';
+            idRow.insertCell().textContent = String(feature.id);
+          }
+          root.append(heading, table);
+          seen++;
+        });
+        if (features.length > seen) {
+          var more = document.createElement('div');
+          more.className = 'hint';
+          more.textContent = '+ ' + (features.length - seen) + ' more';
+          root.appendChild(more);
+        }
+        return root;
+      }
+
+      function query(point) {
+        return view.queryRenderedFeatures([point.x, point.y], { radius: 3 }).filter(function (feature) {
+          return feature.layer && feature.layer.type !== 'background';
+        });
+      }
+
+      function setupInspect() {
+        view.on('click', function (event) {
+          if (!$('inspect').checked) return;
+          var features = query(event.point);
+          if (popup) popup.remove();
+          popup = null;
+          if (!features.length) return;
+          popup = new microMapUI.Popup({ maxWidth: '300px', offset: 6 })
+            .setLngLat(event.lngLat)
+            .setDOMContent(inspectContent(features))
+            .addTo(view);
+        });
+        view.on('mousemove', function (event) {
+          if (!$('inspect').checked || hoverPending || event.originalEvent && event.originalEvent.buttons) return;
+          hoverPending = true;
+          requestAnimationFrame(function () {
+            hoverPending = false;
+            view.getCanvas().style.cursor = query(event.point).length ? 'pointer' : '';
+          });
+        });
+      }
+
+      // ---- Bench ------------------------------------------------------------
+
+      function idle() {
+        return new Promise(function (resolve) {
+          (function check() {
+            if (loaded && performance.now() - lastEvent > 900) resolve();
+            else setTimeout(check, 100);
+          }());
+        });
+      }
+
+      function stats(values) {
+        var sorted = values.slice().sort(function (a, b) { return a - b; });
+        var sum = values.reduce(function (total, value) { return total + value; }, 0);
+        return {
+          n: values.length,
+          mean: +(sum / Math.max(1, values.length)).toFixed(2),
+          p50: +(sorted[Math.floor(sorted.length * 0.5)] || 0).toFixed(2),
+          p95: +(sorted[Math.floor(sorted.length * 0.95)] || 0).toFixed(2),
+          max: +(sorted[sorted.length - 1] || 0).toFixed(2)
+        };
+      }
+
+      function animate(step) {
+        return new Promise(function (resolve) {
+          var intervals = [];
+          var last = null;
+          var index = 0;
+          window.__bench.samples = [];
+          function driver(time) {
+            if (last != null) intervals.push(time - last);
+            last = time;
+            if (index >= frames) {
+              var samples = window.__bench.samples;
+              window.__bench.samples = null;
+              resolve({ mapCallbackMs: stats(samples), frameIntervalMs: stats(intervals) });
+              return;
+            }
+            step(index++);
+            requestAnimationFrame(driver);
+          }
+          driver.__benchDriver = true;
+          requestAnimationFrame(driver);
+        });
+      }
+
+      // Pan and zoom around the current view, keeping bearing and pitch.
+      async function run() {
+        $('run').disabled = true;
+        output.textContent = 'running…';
+        var center = map.getCenter();
+        var baseZoom = map.getZoom();
+        map.setView(center, baseZoom);
+        await idle();
+        var result = {
+          style: styleKind, zoom: +baseZoom.toFixed(2), bearing: Math.round(signedBearing()), pitch: Math.round(map.getPitch()),
+          buildings: $('buildings').checked, dpr: devicePixelRatio, size: [innerWidth, innerHeight], tilesLoaded: loaded, tileErrors: failed
+        };
+        result.pan = await animate(function (i) { map.panBy([i % 60 < 30 ? 6 : -6, i % 60 < 30 ? 3 : -3]); });
+        map.setView(center, baseZoom);
+        await idle();
+        result.zoom = await animate(function (i) { map.setZoom(baseZoom + 0.35 * Math.sin(i / frames * Math.PI * 4)); });
+        map.setView(center, baseZoom);
+        output.textContent = JSON.stringify(result, null, 1);
+        window.benchResult = result;
+        $('run').disabled = false;
+        $('copy').disabled = !navigator.clipboard;
+      }
+      window.benchRun = run;
+    }());
+  </script>
+</body>
+</html>

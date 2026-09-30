@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A local, time-based hazard spread visualization built from the scenario and heatmap modules.">
+  <title>microMap.js · Hazard spread exercise</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.45 system-ui, sans-serif; color: #19272b; }
+    #map { background: repeating-linear-gradient(0deg, transparent 0 64px, #82939522 64px 66px), repeating-linear-gradient(90deg, #e9eee6 0 64px, #dce6d8 64px 66px); }
+    .panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: 16px; border: 1px solid #c4cbc2; border-radius: 12px; background: #fffffff2; box-shadow: 0 8px 28px #0002; }
+    h1 { margin: 0 0 5px; font-size: 19px; } p { margin: 0 0 12px; color: #58665c; }
+    .timeline { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    button, select { min-height: 38px; border: 1px solid #adb9ad; border-radius: 7px; background: #fff; color: inherit; padding: 6px 10px; font: inherit; }
+    button { min-width: 85px; background: #245b3c; color: #fff; border-color: #245b3c; cursor: pointer; }
+    input[type=range] { width: 100%; accent-color: #cf4f2d; }
+    .time { margin-left: auto; font: 12px ui-monospace,monospace; }
+    .legend { height: 12px; margin: 12px 0 3px; border-radius: 12px; background: linear-gradient(90deg,#2563eb,#06b6d4,#84cc16,#facc15,#ef4444); }
+    .legend-label { display: flex; justify-content: space-between; color: #5c6a61; font-size: 11px; }
+    output { display: block; margin-top: 10px; padding: 8px; border-radius: 7px; background: #edf1e9; color: #3c5143; font: 12px/1.4 ui-monospace,monospace; }
+    small { display: block; margin-top: 12px; color: #68766c; font-size: 11px; }
+    @media (max-width: 520px) { .panel { top: auto; bottom: 10px; max-height: 58vh; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <section class="panel" aria-label="Hazard spread exercise controls">
+    <h1>Hazard spread exercise</h1>
+    <p>Scrub a one-hour training scenario. The changing perimeter and weighted heat layer are illustrative inputs for planning interfaces, not a fire-behavior forecast.</p>
+    <div class="timeline"><button id="play" type="button">Play</button><select id="speed" aria-label="Playback speed"><option value="1">1× speed</option><option value="5">5× speed</option><option value="15">15× speed</option></select><span id="clock" class="time">00:00 / 60:00</span></div>
+    <input id="seek" type="range" min="0" max="3600000" step="5000" value="0" aria-label="Simulation time">
+    <div class="legend" aria-hidden="true"></div><div class="legend-label"><span>Lower activity</span><span>Higher activity</span></div>
+    <output id="status" aria-live="polite">Initial ignition · local training scenario</output>
+    <small>Canvas heatmap + GeoJSON perimeter + generic scenario timeline. Everything runs locally and can be replaced with application data.</small>
+  </section>
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.heatmap.min.js"></script>
+  <script src="../lib/microMap.scenario.min.js"></script>
+  <script>
+    (function () {
+      var duration = 60 * 60 * 1000;
+      var map = microMap('#map', { tiles: false, center: [11.69, 48.17], zoom: 11.7, maxZoom: 18, ariaLabel: 'Illustrative hazard spread simulation' });
+      var seed = 41;
+      function random() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+      var origins = [];
+      for (var phase = 0; phase <= 12; phase++) {
+        var fraction = phase / 12;
+        var cx = 11.68 + fraction * .026;
+        var cy = 48.16 + fraction * .018;
+        for (var i = 0; i < 90; i++) {
+          var dx = (random() + random() - 1) * (.006 + fraction * .025);
+          var dy = (random() + random() - 1) * (.005 + fraction * .019);
+          origins.push({ coordinates: [cx + dx + dy * .35, cy + dy], weight: .45 + random() * 1.35, time: phase * 5 * 60 * 1000 });
+        }
+      }
+      var heat = microMap.heatmap(map, { data: origins, radius: 38, intensity: .19, opacity: .7, resolution: .45 });
+      var overlay = microMap.geojson(map);
+      var roads = [];
+      for (i = 0; i < 7; i++) {
+        var lon = 11.64 + i * .016;
+        var lat = 48.125 + i * .011;
+        roads.push({ type: 'Feature', id: 'road-x-' + i, properties: { kind: 'road' }, geometry: { type: 'LineString', coordinates: [[lon, 48.115], [lon + .008, 48.215]] } });
+        roads.push({ type: 'Feature', id: 'road-y-' + i, properties: { kind: 'road' }, geometry: { type: 'LineString', coordinates: [[11.61, lat], [11.77, lat + .004]] } });
+      }
+      overlay.addSource('hazard', { type: 'geojson', data: { type: 'FeatureCollection', features: roads } });
+      overlay.addLayer({ id: 'roads', type: 'line', source: 'hazard', filter: ['==', ['get', 'kind'], 'road'], paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-opacity': .8 } });
+      overlay.addLayer({ id: 'perimeter-fill', type: 'fill', source: 'hazard', filter: ['==', ['get', 'kind'], 'perimeter'], paint: { 'fill-color': '#ed6037', 'fill-opacity': .17, 'fill-outline-color': '#bc3c26', 'fill-outline-width': 2 } });
+      overlay.addLayer({ id: 'ignition', type: 'circle', source: 'hazard', filter: ['==', ['get', 'kind'], 'ignition'], paint: { 'circle-color': '#b7251a', 'circle-radius': 8, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      var scenario = microMap.scenario({
+        id: 'wind-driven-hazard-exercise', title: 'Wind-driven hazard exercise', duration: duration,
+        entities: [{ id: 'front', type: 'hazard', properties: { label: 'Illustrative fire front' }, track: [
+          { time: 0, coordinates: [11.68, 48.16], status: 'ignition' },
+          { time: 900000, coordinates: [11.6865, 48.1645], status: 'initial spread' },
+          { time: 1800000, coordinates: [11.693, 48.169], status: 'moving north-east' },
+          { time: 2700000, coordinates: [11.6995, 48.1735], status: 'wind shift' },
+          { time: duration, coordinates: [11.706, 48.178], status: 'scenario complete' }
+        ] }],
+        events: [
+          { time: 0, type: 'ignition', title: 'Initial ignition · wind from the south-west' },
+          { time: 900000, type: 'spread', title: 'Spread reaches the first training sector' },
+          { time: 1800000, type: 'wind', title: 'Wind speed increases · perimeter expands' },
+          { time: 2700000, type: 'wind', title: 'Wind direction shifts north-east' },
+          { time: duration, type: 'review', title: 'Scenario complete · inspect heat and perimeter history' }
+        ]
+      });
+      var seek = document.getElementById('seek');
+      var clock = document.getElementById('clock');
+      var play = document.getElementById('play');
+      var status = document.getElementById('status');
+      var lastBucket = -1;
+      function format(ms) { var seconds = Math.floor(ms / 1000); return String(Math.floor(seconds / 60)).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0'); }
+      function render(snapshot) {
+        var bucket = Math.floor(snapshot.time / 500);
+        if (bucket === lastBucket) return;
+        lastBucket = bucket;
+        var fraction = snapshot.time / duration;
+        var front = snapshot.entities[0].coordinates;
+        var radiusX = .010 + fraction * .032;
+        var radiusY = .008 + fraction * .024;
+        var ring = [];
+        for (var step = 0; step <= 48; step++) {
+          var angle = step / 48 * Math.PI * 2;
+          var downwind = Math.max(0, Math.cos(angle - Math.PI / 4));
+          var stretch = 1 + downwind * fraction * .55;
+          ring.push([front[0] + Math.cos(angle) * radiusX * stretch, front[1] + Math.sin(angle) * radiusY * stretch]);
+        }
+        var features = roads.slice();
+        features.push({ type: 'Feature', id: 'perimeter', properties: { kind: 'perimeter', status: snapshot.entities[0].status }, geometry: { type: 'Polygon', coordinates: [ring] } });
+        features.push({ type: 'Feature', id: 'ignition-point', properties: { kind: 'ignition' }, geometry: { type: 'Point', coordinates: front } });
+        overlay.getSource('hazard').setData({ type: 'FeatureCollection', features: features });
+        heat.setTimeRange([0, snapshot.time]);
+        seek.value = snapshot.time;
+        clock.textContent = format(snapshot.time) + ' / 60:00';
+        status.textContent = snapshot.entities[0].status + ' · ' + Math.round(fraction * 100) + '% of exercise elapsed';
+      }
+      scenario.on('tick', function (event) { render(event.snapshot); });
+      scenario.on('play', function () { play.textContent = 'Pause'; });
+      scenario.on('pause', function () { play.textContent = 'Play'; });
+      scenario.on('event', function (event) { status.textContent = format(event.event.time) + ' · ' + event.event.title; });
+      play.addEventListener('click', function () { scenario.isPlaying() ? scenario.pause() : scenario.play(); });
+      seek.addEventListener('input', function () { scenario.seek(+seek.value); });
+      document.getElementById('speed').addEventListener('change', function (event) { scenario.setSpeed(+event.target.value); });
+      render(scenario.getSnapshot());
+    }());
+  </script>
+</body>
+</html>

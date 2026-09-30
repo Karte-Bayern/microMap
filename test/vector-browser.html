@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>microMap.vector browser smoke test</title>
+<div id="map" style="width:640px;height:480px"></div>
+<pre id="result">RUNNING</pre>
+<script src="../lib/microMap.min.js"></script>
+<script src="../lib/microMap.vector.min.js"></script>
+<script>
+  var errors = [];
+  function check(value, message) { if (!value) errors.push(message); }
+  var fixture = 'data:application/vnd.mapbox-vector-tile;base64,' +
+    'GjoKDnRyYW5zcG9ydGF0aW9uEhEIBxICAAAYAiIHCQAACoBAABoFY2xhc3MiCQoHcHJpbWFyeSiAIHgCGjsKCWxhbmRjb3ZlchIYCAcSAgAAGAMiDgkAABqAQAAAgED/PwAPGgVjbGFzcyIICgZmb3Jlc3QogCB4AhosCgVwbGFjZRIPCAcSAgAAGAEiBQmAQIBAGgVjbGFzcyIGCgR0b3duKIAgeAI=';
+  var map = microMap('#map', { tiles: false, center: [0, 0], zoom: 0, zoomAnimation: false });
+  var layer = microMapVector(map, {
+    tiles: fixture,
+    minZoom: 0,
+    maxZoom: 2,
+    tileBuffer: 0,
+    style: [
+      { sourceLayer: 'landcover', type: 'fill', paint: { color: '#dfe9d7' } },
+      { sourceLayer: 'transportation', type: 'line', paint: { color: '#d75d38', width: 2 } }
+    ]
+  });
+  var attempts = 0;
+  function verify() {
+    attempts++;
+    var canvas = layer.getCanvas();
+    var pixel = canvas.getContext('2d').getImageData(320, 240, 1, 1).data;
+    if (!pixel[3] && attempts < 12) return requestAnimationFrame(verify);
+    check(canvas.parentNode === document.querySelector('#map'), 'vector canvas mounted');
+    check(pixel[3] > 0, 'MVT geometry rendered to canvas');
+    document.querySelector('#result').textContent = errors.length ? 'FAIL: ' + errors.join(', ') : 'PASS';
+    document.title = errors.length ? 'FAIL' : 'PASS';
+  }
+  requestAnimationFrame(verify);
+</script>

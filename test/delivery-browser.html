@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MicroMap delivery smoke</title>
+<style>
+  body { margin: 0; color: #18334b; background: #f5f8fa; font: 16px system-ui, sans-serif; }
+  main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+  #map { height: 360px; background: #e3edf1; border: 1px solid #bdccd4; }
+  button { padding: 10px 16px; margin: 12px 8px 12px 0; font: inherit; }
+  output { display: block; white-space: pre-wrap; }
+</style>
+<main>
+  <h1>MicroMap delivery smoke</h1>
+  <p>Synthetic route and numbered stops, loaded from local assets without external requests.</p>
+  <div id="map" aria-label="Synthetic delivery route"></div>
+  <button id="run">Run delivery checks</button>
+  <button id="update">Move second stop</button>
+  <output id="status" aria-live="polite">Ready. Select a numbered stop.</output>
+</main>
+<script src="../lib/microMap.min.js"></script>
+<script src="../lib/microMap.geojson.min.js"></script>
+<script src="../lib/microMap.camera.min.js"></script>
+<script src="../lib/microMap.compose.min.js"></script>
+<script>
+  (function () {
+    var output = document.getElementById('status');
+    var base = microMap('#map', { tiles: false, center: [12, 48], zoom: 12 });
+    var map = microMapCompose(base, { geojson: true, camera: true });
+    var coordinates = [[12, 48], [12.013, 48.006], [12.021, 48.003]];
+    function stops() {
+      return { type: 'FeatureCollection', features: coordinates.map(function (coordinate, index) {
+        return { type: 'Feature', id: index + 1, properties: { label: String(index + 1), color: index ? '#2563eb' : '#0f766e' }, geometry: { type: 'Point', coordinates: coordinate } };
+      }) };
+    }
+    function route() { return { type: 'Feature', geometry: { type: 'LineString', coordinates: coordinates } }; }
+    map.addSource('route', { type: 'geojson', data: route() });
+    map.addSource('stops', { type: 'geojson', data: stops() });
+    map.addLayer({ id: 'route', source: 'route', type: 'line', paint: { 'line-color': '#2563eb', 'line-width': 5 } });
+    map.addLayer({ id: 'stop', source: 'stops', type: 'circle', paint: { 'circle-radius': 14, 'circle-color': ['get', 'color'] } });
+    map.addLayer({ id: 'number', source: 'stops', type: 'symbol', layout: { 'text-field': ['get', 'label'], 'text-size': 14 }, paint: { 'text-color': '#ffffff' } });
+    map.on('click', 'stop', function (event) { output.textContent = 'Selected stop ' + event.features[0].id; });
+    function fit() { map.fitBounds(map.getOverlayBounds(), { padding: { left: 60, right: 32, top: 32, bottom: 60 }, maxZoom: 16 }); }
+    fit();
+    document.getElementById('update').onclick = function () {
+      coordinates[1] = coordinates[1][1] > 48.01 ? [12.013, 48.006] : [12.01, 48.013];
+      map.getSource('route').setData(route());
+      map.getSource('stops').setData(stops());
+      fit();
+      output.textContent = 'Route and second stop updated.';
+    };
+    document.getElementById('run').onclick = function () {
+      try {
+        fit();
+        var hits = map.queryRenderedFeatures(map.project(coordinates[1]), { layers: ['stop'] });
+        if (!hits.length || hits[0].id !== 2) throw new Error('Updated stop hit testing failed');
+        coordinates.forEach(function (point) {
+          var pixel = map.project(point);
+          if (pixel[0] < 59.99 || pixel[0] > base.getCameraState().width - 31.99 || pixel[1] < 31.99 || pixel[1] > 300.01) throw new Error('Stop clipped outside padding');
+        });
+        var temporary = document.createElement('div');
+        temporary.style.cssText = 'width:100px;height:100px';
+        document.body.appendChild(temporary);
+        var disposable = microMapCompose(microMap(temporary, { tiles: false }), { geojson: true, camera: true });
+        disposable.addMarker([0, 0]);
+        disposable.easeTo({ center: [2, 2], duration: 500 });
+        disposable.remove();
+        disposable.remove();
+        if (temporary.children.length) throw new Error('Map teardown left DOM behind');
+        temporary.remove();
+        output.textContent = 'PASS: route + numbered stops\nPASS: updated stop query\nPASS: asymmetric fitBounds\nPASS: animation + marker + overlay teardown';
+      } catch (error) { output.textContent = 'FAIL: ' + error.message; }
+    };
+  })();
+</script>
