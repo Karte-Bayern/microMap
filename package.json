@@ -1,6 +1,6 @@
 {
   "name": "@karte.bayern/micromap",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Lightweight, dependency-free web maps with a MapLibre-shaped API, vector and raster rendering, GeoJSON and UI modules.",
   "main": "lib/microMap.js",
   "browser": "lib/microMap.js",
@@ -98,10 +98,10 @@
   "scripts": {
     "build": "node tools/build.mjs",
     "test": "node --test",
-    "check": "node tools/build.mjs --check && npm test && npm run check:types && npm run check:package",
+    "check": "npm run build && npm test && npm run check:types && npm run check:package",
     "stage:pages": "node tools/stage-pages.mjs",
     "check:package": "node tools/check-package.mjs",
-    "prepack": "node tools/build.mjs --check",
+    "prepack": "npm run build",
     "prepublishOnly": "npm run check",
     "check:types": "tsc -p types/tsconfig.json"
   },

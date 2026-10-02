@@ -45,7 +45,7 @@ map.on('load', () => {
 - **Typed.** TypeScript declarations for the core, the MapLibre API and the
   bundle are included.
 
-| | microMap 0.2 | MapLibre GL JS 6 |
+| | microMap 0.3 | MapLibre GL JS 6 |
 | --- | --- | --- |
 | Download (min+gzip, everything) | ~115 KB | ~156 KB (main + worker) |
 | Raster-only map | ~16 KB | ~156 KB |
@@ -104,11 +104,13 @@ npm run check
 make serve
 ```
 
-`npm run check` verifies the minified bundles and size budgets, runs the tests,
-type-checks the declarations and installs the packed tarball. After editing
-`lib/`, run `npm run build`. For rendering or interaction changes also open the
-relevant `test/` or `demo/` page in a browser: automated tests use simulated
-DOM and Canvas APIs and verify behaviour, not pixels.
+`npm run check` regenerates the release bundles, verifies their size budgets,
+runs the tests, type-checks the declarations and installs the packed tarball.
+The generated all-in-one files under `dist/` are created for the package build
+and are not part of the source repository. After editing `lib/`, run
+`npm run build`. For rendering or interaction changes also open the relevant
+`test/` or `demo/` page in a browser: automated tests use simulated DOM and
+Canvas APIs and verify behaviour, not pixels.
 
 Maintained by [Simon Waldherr](https://github.com/SimonWaldherr/).
 [MIT license](LICENSE); map data and imagery have separate licenses.

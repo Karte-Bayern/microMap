@@ -31,7 +31,7 @@ check: ## Verify bundles, size budgets, tests and installed package.
 check-package: ## Verify tarball contents, imports and browser bundling.
 	$(NPM) run check:package
 
-pack: ## Create the npm tarball; rejects stale bundles.
+pack: ## Create the npm tarball; builds release bundles first.
 	$(NPM) pack
 
 pages: ## Stage the public site into an empty PAGES_DIR.
