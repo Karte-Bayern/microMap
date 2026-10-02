@@ -1,13 +1,16 @@
 {
   "name": "@karte.bayern/micromap",
-  "version": "0.1.0",
-  "description": "Dependency-free JavaScript maps with XYZ raster tiles and optional vector, GeoJSON and UI modules.",
+  "version": "0.2.0",
+  "description": "Lightweight, dependency-free web maps with a MapLibre-shaped API, vector and raster rendering, GeoJSON and UI modules.",
   "main": "lib/microMap.js",
   "browser": "lib/microMap.js",
   "unpkg": "lib/microMap.min.js",
   "jsdelivr": "lib/microMap.min.js",
   "exports": {
-    ".": "./lib/microMap.js",
+    ".": {
+      "types": "./types/micromap.d.ts",
+      "default": "./lib/microMap.js"
+    },
     "./vector": "./lib/microMap.vector.js",
     "./geojson": "./lib/microMap.geojson.js",
     "./field": "./lib/microMap.field.js",
@@ -25,6 +28,16 @@
     "./compose": "./lib/microMap.compose.js",
     "./raster": "./lib/microMap.raster.js",
     "./webgl": "./lib/microMap.webgl.js",
+    "./maplibre": {
+      "types": "./types/maplibre.d.ts",
+      "default": "./lib/microMap.maplibre.js"
+    },
+    "./bundle": {
+      "types": "./types/bundle.d.ts",
+      "import": "./dist/micromap.mjs",
+      "require": "./dist/micromap.cjs",
+      "default": "./dist/micromap.min.js"
+    },
     "./microMap.js": "./lib/microMap.js",
     "./microMap.min.js": "./lib/microMap.min.js",
     "./microMap.vector.js": "./lib/microMap.vector.js",
@@ -64,27 +77,37 @@
     "./ui": "./lib/microMap.ui.js",
     "./microMap.ui.js": "./lib/microMap.ui.js",
     "./microMap.ui.min.js": "./lib/microMap.ui.min.js",
-    "./styles/karte-bayern-blue": "./styles/karte-bayern-blue.js"
+    "./styles/karte-bayern-blue": "./styles/karte-bayern-blue.js",
+    "./microMap.maplibre.js": "./lib/microMap.maplibre.js",
+    "./microMap.maplibre.min.js": "./lib/microMap.maplibre.min.js",
+    "./dist/micromap.min.js": "./dist/micromap.min.js",
+    "./dist/micromap.mjs": "./dist/micromap.mjs",
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "dist",
+    "types",
     "styles/karte-bayern-blue.js",
     "README.md",
     "docs/reference.md",
     "docs/modules.md",
+    "docs/maplibre.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "node tools/build.mjs",
     "test": "node --test",
-    "check": "node tools/build.mjs --check && npm test && npm run check:package",
+    "check": "node tools/build.mjs --check && npm test && npm run check:types && npm run check:package",
     "stage:pages": "node tools/stage-pages.mjs",
     "check:package": "node tools/check-package.mjs",
     "prepack": "node tools/build.mjs --check",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "npm run check",
+    "check:types": "tsc -p types/tsconfig.json"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
   },
   "keywords": [
     "map",
@@ -96,7 +119,14 @@
     "canvas",
     "pmtiles",
     "openstreetmap",
-    "gis"
+    "gis",
+    "maplibre",
+    "maplibre-gl",
+    "mapbox-gl-alternative",
+    "3d",
+    "perspective",
+    "webgl",
+    "typescript"
   ],
   "license": "MIT",
   "author": "Simon Waldherr",
@@ -111,5 +141,6 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  }
+  },
+  "types": "types/micromap.d.ts"
 }

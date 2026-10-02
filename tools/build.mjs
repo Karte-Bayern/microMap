@@ -1,7 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { Script } from 'node:vm';
-import { transform } from 'esbuild';
+import { build as bundle, transform } from 'esbuild';
+import { mkdir } from 'node:fs/promises';
 
 const packageUrl = new URL('../package.json', import.meta.url);
 const packageJson = JSON.parse(await readFile(packageUrl, 'utf8'));
@@ -19,9 +20,10 @@ const builds = [
     sourceUrl: new URL('../lib/microMap.vector.js', import.meta.url),
     outputUrl: new URL('../lib/microMap.vector.min.js', import.meta.url),
     banner: '/*! microMap.vector.js v' + packageJson.version + ' | MIT */',
-    // MVT decoding, style evaluation, labels and building extrusions remain
-    // separate from the raster core. Budget: 48 KiB minified + gzip.
-    budget: 49152
+    // MVT decoding, style evaluation, labels, the perspective (tilted)
+    // renderer and WebGL buildings remain separate from the raster core.
+    // Budget: 56 KiB minified + gzip.
+    budget: 57344
   },
   {
     name: 'geojson',
@@ -133,6 +135,15 @@ const builds = [
     budget: 16384
   },
   {
+    name: 'maplibre',
+    sourceUrl: new URL('../lib/microMap.maplibre.js', import.meta.url),
+    outputUrl: new URL('../lib/microMap.maplibre.min.js', import.meta.url),
+    banner: '/*! microMap.maplibre.js v' + packageJson.version + ' | MIT */',
+    // Construction, style loading and MapLibre's event model only: the
+    // rendering and UI stay in their own modules.
+    budget: 8192
+  },
+  {
     name: 'ui',
     sourceUrl: new URL('../lib/microMap.ui.js', import.meta.url),
     outputUrl: new URL('../lib/microMap.ui.min.js', import.meta.url),
@@ -196,6 +207,72 @@ for (const build of builds) {
   }
   if (report[build.name].gzipped >= build.budget) {
     console.error(build.name + ' bundle exceeds its minified+gzip budget.');
+    failed = true;
+  }
+}
+
+// All-in-one distributions of the general-purpose modules: a classic
+// script exposing `microMap` and a native ES module with MapLibre-style
+// named exports. Specialised add-ons stay separate.
+const bundles = [
+  {
+    name: 'bundle',
+    entry: new URL('./bundle/browser.cjs', import.meta.url),
+    outputUrl: new URL('../dist/micromap.min.js', import.meta.url),
+    format: 'iife',
+    globalName: 'microMap',
+    budget: 122880
+  },
+  {
+    name: 'bundle-esm',
+    entry: new URL('./bundle/module.mjs', import.meta.url),
+    outputUrl: new URL('../dist/micromap.mjs', import.meta.url),
+    format: 'esm',
+    budget: 122880
+  },
+  {
+    name: 'bundle-cjs',
+    entry: new URL('./bundle/browser.cjs', import.meta.url),
+    outputUrl: new URL('../dist/micromap.cjs', import.meta.url),
+    format: 'cjs',
+    budget: 122880
+  }
+];
+if (!checkOnly) await mkdir(new URL('../dist/', import.meta.url), { recursive: true });
+for (const item of bundles) {
+  const result = await bundle({
+    entryPoints: [item.entry.pathname],
+    bundle: true,
+    minify: true,
+    format: item.format,
+    globalName: item.globalName,
+    target: 'es2018',
+    platform: 'browser',
+    legalComments: 'none',
+    sourcemap: 'external',
+    sourcesContent: false,
+    outfile: item.outputUrl.pathname,
+    write: false,
+    banner: { js: '/*! microMap.js v' + packageJson.version + ' (all-in-one) | MIT */' },
+    logLevel: 'silent'
+  });
+  const code = result.outputFiles.find(file => !file.path.endsWith('.map'));
+  const map = result.outputFiles.find(file => file.path.endsWith('.map'));
+  const text = code.text.replace(/\n?\/\/# sourceMappingURL=.*\n?$/, '\n//# sourceMappingURL=' + item.outputUrl.pathname.split('/').pop() + '.map\n');
+  if (checkOnly) {
+    let current = null;
+    try { current = await readFile(item.outputUrl, 'utf8'); } catch {}
+    if (current !== text) {
+      console.error(item.outputUrl.pathname.split('/').pop() + ' is out of date; run npm run build.');
+      failed = true;
+    }
+  } else {
+    await writeFile(item.outputUrl, text);
+    await writeFile(new URL(item.outputUrl.href + '.map'), map.text);
+  }
+  report[item.name] = { minified: Buffer.byteLength(text), gzipped: gzipSync(text, { level: 9 }).length, budget: item.budget };
+  if (report[item.name].gzipped >= item.budget) {
+    console.error(item.name + ' exceeds its minified+gzip budget.');
     failed = true;
   }
 }

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "es2018",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "esModuleInterop": true,
+    "lib": ["es2018", "dom"],
+    "types": [],
+    "skipLibCheck": false
+  },
+  "files": ["../types-check/usage.ts"]
+}

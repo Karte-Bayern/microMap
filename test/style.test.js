@@ -359,7 +359,8 @@ test('merges same-name line parts so a label fits along the joined street', asyn
     const source = parts === 2 ? data : tile({ transportation: [{ type: 2, commands: lineCommands([[1000, 2000], [1800, 2000]]), props: { name: 'Lindenallee' } }] });
     const { map, layer, context } = setup(style, source, { zoom: 2 });
     await wait();
-    const count = context.ops.filter(op => op.op === 'text' && op.text === 'Lindenallee').length;
+    // Line labels are drawn glyph by glyph: count the spelled-out names.
+    const count = context.ops.filter(op => op.op === 'text').map(op => op.text).join('').split('Lindenallee').length - 1;
     layer.destroy();
     map.destroy();
     return count;
@@ -805,4 +806,21 @@ test('adds and removes a WMS raster source through compose in style order', asyn
   assert.ok(!context.ops.some(op => op.op === 'drawImage'), 'removed raster tiles do not draw');
   assert.throws(() => composed.addSource('bad', { type: 'raster', tiles: ['/no-template'] }), /XYZ or WMS tile template/);
   composed.remove();
+});
+
+test('MapLibre expressions beyond the basics: colours, arrays, text and math', () => {
+  const vector = require('../lib/microMap.vector.js');
+  const evaluate = (expression, properties = {}, zoom = 10) => vector.evaluateExpression(expression, { properties, zoom });
+  assert.equal(evaluate(['rgb', 255, 128, 0]), 'rgba(255,128,0,1)');
+  assert.equal(evaluate(['rgba', 0, 0, 0, 0.5]), 'rgba(0,0,0,0.5)');
+  assert.deepEqual(evaluate(['to-rgba', '#ff0000']), [255, 0, 0, 1]);
+  assert.equal(evaluate(['at', 1, ['literal', ['a', 'b', 'c']]]), 'b');
+  assert.equal(evaluate(['index-of', 'b', ['literal', ['a', 'b']]]), 1);
+  assert.equal(evaluate(['slice', ['get', 'name'], 0, 3], { name: 'Munich' }), 'Mun');
+  assert.equal(evaluate(['format', ['get', 'name'], { 'font-scale': 0.8 }, ' ', {}, ['get', 'ref'], {}], { name: 'A9', ref: 'E45' }), 'A9 E45');
+  assert.equal(evaluate(['typeof', ['get', 'n']], { n: 3 }), 'number');
+  assert.equal(evaluate(['get', 'b', ['literal', { b: 2 }]]), 2);
+  assert.ok(Math.abs(evaluate(['sin', ['/', ['pi'], 2]]) - 1) < 1e-12);
+  assert.equal(evaluate(['number-format', 1234.5, { locale: 'en-US', 'max-fraction-digits': 0 }]), '1,235');
+  assert.equal(evaluate(['interpolate-hcl', ['linear'], ['zoom'], 0, 0, 20, 10]), 5);
 });

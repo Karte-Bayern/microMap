@@ -36,8 +36,10 @@ try {
     assert.ok(!/(?:^|\/)(?:\.DS_Store|\.npmrc|\.env[^/]*|node_modules)(?:\/|$)/.test(file),
       `Local configuration in package: ${file}`);
   }
-  for (const target of [pkg.main, pkg.browser, pkg.unpkg, pkg.jsdelivr, ...Object.values(pkg.exports)]) {
-    assert.ok(files.has(target.replace(/^\.\//, '')), `Missing entry: ${target}`);
+  // Export targets are paths or condition objects ({ types, import, default }).
+  const targets = value => typeof value === 'string' ? [value] : Object.values(value).flatMap(targets);
+  for (const target of [pkg.main, pkg.browser, pkg.unpkg, pkg.jsdelivr, pkg.types, ...Object.values(pkg.exports).flatMap(targets)]) {
+    assert.ok(target === './package.json' || files.has(target.replace(/^\.\//, '')), `Missing entry: ${target}`);
   }
   for (const file of ['README.md', 'LICENSE']) assert.ok(files.has(file), `Missing ${file}`);
   assert.equal(Object.keys(pkg.dependencies || {}).length, 0, 'Unexpected runtime dependencies');
@@ -49,10 +51,18 @@ try {
     const name = pkg.name + (subpath === '.' ? '' : subpath.slice(1));
     return `assert.ok(require(${JSON.stringify(name)}), ${JSON.stringify(name)});`;
   }).join('\n');
+  const bundleName = pkg.name + '/bundle';
+  const bundleCheck = `const bundle = require(${JSON.stringify(bundleName)});\nif (typeof bundle.Map !== 'function' || typeof bundle.getVersion !== 'function') throw new Error('CommonJS bundle exports');`;
   execFileSync(process.execPath, ['-e', `const assert = require('node:assert/strict');\n${assertions}`], {
     cwd: temporary, stdio: 'pipe'
   });
+  execFileSync(process.execPath, ['-e', bundleCheck], { cwd: temporary, stdio: 'pipe' });
 
+  // The all-in-one ES module offers MapLibre's named exports.
+  await writeFile(join(temporary, 'bundle-smoke.mjs'), `globalThis.document = undefined;
+import { Map, Marker, LngLat, getVersion } from ${JSON.stringify(pkg.name + '/bundle')};
+if (typeof Map !== 'function' || typeof Marker !== 'function' || new LngLat(1, 2).lat !== 2 || !getVersion()) throw new Error('bundle exports');`);
+  execFileSync(process.execPath, ['bundle-smoke.mjs'], { cwd: temporary, stdio: 'pipe' });
   const entry = `import microMap from ${JSON.stringify(pkg.name)};
 import vector from ${JSON.stringify(pkg.name + '/vector')};
 import geojson from ${JSON.stringify(pkg.name + '/geojson')};

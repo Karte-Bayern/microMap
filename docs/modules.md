@@ -6,6 +6,21 @@ Import only the modules your application needs. npm subpaths use
 Load the core first. Modules use CommonJS with ESM default-import interop;
 keep their imports when configuring bundler side-effect elimination.
 
+## MapLibre-compatible map
+
+```js
+import { Map, Marker, NavigationControl } from '@karte.bayern/micromap/bundle';
+
+const map = new Map({ container: 'map', style: 'https://example.test/style.json', center: [12.49, 48.63], zoom: 12 });
+```
+
+`maplibre` (`microMap.Map` after loading `lib/microMap.maplibre.js`) composes
+the core, `vector`, `camera`, `compose` and `ui` into MapLibre's `Map` class:
+style loading, events, markers, popups and controls. The all-in-one files
+`dist/micromap.min.js` (global `microMap`) and `dist/micromap.mjs` contain it
+together with `geojson`, `raster`, `pmtiles` and `export`. See the
+[migration guide](maplibre.md).
+
 ## Vector tiles
 
 ```js
@@ -23,7 +38,15 @@ const vectors = vector(map, {
 source layers such as `water`, `building` and `transportation`. Match styles to
 your tiles' actual schema. For TileJSON use
 `await vector.fromTileJSON(map, '/tilejson.json', { style })`; for Style v8 use
-`await vector.fromStyle(map, styleDocument, options)`.
+`await vector.fromStyle(map, styleDocument, options)` (all vector, GeoJSON and
+raster sources of the style; `transformRequest(url, kind)` rewrites requests).
+
+With a pitched camera the layer paints each tile of a level-of-detail cover
+once into its own canvas and lets the browser composite them in perspective;
+buildings use WebGL (`webgl: false` forces Canvas 2D). `perspective: false`
+keeps the older affine 2.5D renderer for map adapters without a perspective
+camera. `vector.evaluateExpression(expression, { properties, zoom })` evaluates
+a style expression for one feature.
 
 Use `setStyle()`, `setTiles()`, `queryRenderedFeatures(point, options?)` and
 `destroy()` on the returned surface. Inspect `getStyleReport()` when importing
@@ -107,7 +130,7 @@ factories such as `ui.marker()` use `[latitude, longitude]`.
 | `mlt` | Adapter for an application-supplied MLT decoder; load `vector` first |
 | `network` | Routing on an application-supplied weighted graph |
 | `scenario` | Time-based entities, events and playback |
-| `webgl` | Optional WebGL surface, not a complete vector renderer |
+| `webgl` | Optional WebGL surface for custom drawing |
 
 PMTiles accepts an HTTP URL with byte-range/CORS support or a local File/Blob.
 Use `getHeader()`, `getMetadata()`, `getTile()`, `vectorOptions()` or

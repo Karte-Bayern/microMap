@@ -8,8 +8,10 @@ The constructor requires a browser DOM.
 ## Loading
 
 With a bundler, use `import microMap from '@karte.bayern/micromap'`.
-CommonJS uses `require('@karte.bayern/micromap')`. The package provides CommonJS
-modules with ESM default-import interop, not native browser ES modules.
+CommonJS uses `require('@karte.bayern/micromap')`. The modules are CommonJS with
+ESM default-import interop; `@karte.bayern/micromap/bundle` (`dist/micromap.mjs`)
+is a native ES module with every general-purpose module and MapLibre-style
+named exports. TypeScript declarations are included.
 
 For a page without a bundler:
 
@@ -38,7 +40,9 @@ See [modules](modules.md).
 | `center`, `zoom` | `[0, 0]`, `0` | Initial position and fractional zoom |
 | `minZoom`, `maxZoom` | `0`, `19` | Camera zoom limits |
 | `tileSize` | `256` | Tile size in CSS pixels |
-| `bearing`, `pitch` | `0`, `0` | Bearing and affine tilt in degrees; maximum pitch is 60° |
+| `bearing`, `pitch` | `0`, `0` | Bearing and perspective tilt in degrees |
+| `maxPitch` | `60` | Steepest allowed tilt, at most 85° |
+| `sky` | defaults | `{ skyColor, horizonColor, fogColor, fogBlend }` above the horizon of steep views; `false` disables it |
 | `maxBounds` | none | Bounds constraining the map center |
 | `zoomSnap` | `0` | Zoom step; zero allows continuous zoom |
 | `attribution` | none | Provider credit; accepts trusted HTML, never pass unsanitized user input |
@@ -61,6 +65,9 @@ Tile templates support `{z}`, `{x}`, `{y}`, `{-y}` (TMS row) and `{s}`
 | --- | --- |
 | `setView(center, zoom?)`, `setCenter(center)`, `setZoom(zoom)` | Move the camera |
 | `setBearing(degrees)`, `setPitch(degrees)` | Rotate or tilt |
+| `setMinZoom(z)`, `setMaxZoom(z)`, `setMaxPitch(degrees)` | Change camera limits at runtime |
+| `setSky(options \| false)`, `getSky()` | Sky and fog of tilted views |
+| `getCamera()` | The perspective camera: `project(dx, dy, dz)`, `unproject(x, y)`, `unprojectAt(x, y, dz)`, `cover(options)` in raw map pixels |
 | `fitBounds(bounds, padding?)` | Fit an extent; use the camera add-on for detailed fitting options |
 | `getCenter()`, `getZoom()`, `getBounds()` | Read camera position and visible bounds |
 | `project(coordinate)`, `unproject([x, y])` | Convert coordinates to/from container pixels |
@@ -87,15 +94,26 @@ Destroy separately created add-on surfaces before destroying the core. A compose
 facade offers `remove()` for full teardown. Core `whenIdle()` does not wait for
 optional vector or overlay requests.
 
+## Camera
+
+The camera is a pinhole camera with MapLibre's 36.87° vertical field of view,
+orbiting the map centre: `zoom` is the scale at the centre, nearer ground is
+larger and far ground shrinks towards a horizon. A tilted map loads coarser
+tiles towards the horizon, so the request count stays bounded at any pitch;
+above the far row (ground smaller than a fifth of its size at the centre) the
+sky and fog are shown. `project()` and `unproject()` are exact inverses below
+that row, and straight lines stay straight, so overlays may project vertices
+one by one. `microMap.createCamera(state)` exposes the same mathematics for
+tests and add-ons.
+
 ## Limits
 
-- The camera uses affine projection: bearing and tilt work, but there is no
-  perspective horizon, terrain or globe.
-- MapLibre Style v8 support is a subset, not a drop-in MapLibre replacement.
-  Inspect `vectors.getStyleReport()` for unsupported or approximated features.
-- `fromStyle()` initializes one vector source; additional vector sources can be
-  added at runtime. Fonts use browser fonts instead of glyph-PBF atlases; curved
-  road labels and some icon behavior are not equivalent to MapLibre.
+- There is no terrain or globe projection yet.
+- MapLibre Style v8 support covers the commonly used layer types, sources and
+  expressions; see the [migration guide](maplibre.md). Inspect
+  `vectors.getStyleReport()` for unsupported or approximated features. Fonts use
+  browser fonts instead of glyph-PBF atlases; road labels are not bent around
+  curves.
 - The separate GeoJSON overlay supports a smaller expression set and draws on its
   own canvas. Use vector-owned GeoJSON for ordering among basemap layers.
 - The library does not supply tile hosting, geocoding, road data or offline package

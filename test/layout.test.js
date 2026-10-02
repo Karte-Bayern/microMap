@@ -7,7 +7,9 @@ const root = path.resolve(__dirname, '..');
 
 test('package exports and browser script references resolve after relocation', () => {
   const packageJson = require('../package.json');
-  for (const target of Object.values(packageJson.exports)) {
+  // Targets are paths or condition objects ({ types, import, default }).
+  const targets = value => typeof value === 'string' ? [value] : Object.values(value).flatMap(targets);
+  for (const target of Object.values(packageJson.exports).flatMap(targets)) {
     assert.ok(fs.existsSync(path.join(root, target)), `missing package export ${target}`);
   }
   const pages = [

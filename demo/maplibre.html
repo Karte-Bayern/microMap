@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="microMap.js demo: MapLibre GL JS compatible API with public MapLibre styles, perspective pitch and 3D buildings.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>microMap.js · MapLibre API and 3D</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { font: 14px/1.4 system-ui, sans-serif; color: #1d2b33; }
+    #map { background: #e8e6e1; }
+    .panel {
+      position: fixed; z-index: 10; top: 12px; left: 12px;
+      width: min(330px, calc(100vw - 24px)); padding: 12px;
+      border: 1px solid #0002; border-radius: 8px; background: #fffd;
+      box-shadow: 0 4px 18px #0002; backdrop-filter: blur(8px);
+    }
+    .panel strong { display: block; margin-bottom: 6px; }
+    .panel p { margin: 0 0 8px; }
+    .demos { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 8px; font-size: 13px; }
+    .demos a[aria-current] { font-weight: 600; color: inherit; text-decoration: none; }
+    label { display: grid; grid-template-columns: 64px 1fr 34px; align-items: center; gap: 6px; margin: 6px 0; }
+    select { width: 100%; min-height: 34px; }
+    input[type=range] { width: 100%; }
+    output { font-family: ui-monospace, monospace; font-size: 12px; text-align: right; }
+    .places { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    button { min-height: 34px; padding: 4px 10px; cursor: pointer; }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #1769e0; outline-offset: 2px; }
+    .status { min-height: 1.4em; margin: 6px 0 0; font-size: 12px; color: #46545b; }
+    details { margin-top: 8px; font-size: 12px; }
+    pre { overflow: auto; max-height: 180px; margin: 6px 0 0; padding: 6px; background: #f3f4f2; border-radius: 4px; font-size: 11px; }
+    @media (max-width: 480px) { .panel { top: auto; bottom: 12px; } details { display: none; } }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Interactive map rendering a MapLibre style"></div>
+  <section class="panel" aria-labelledby="title">
+    <nav class="demos" aria-label="Demos">
+      <a href="index.html">Raster</a>
+      <a href="vector.html">MVT vector</a>
+      <a href="maplibre.html" aria-current="page">MapLibre API · 3D</a>
+      <a href="geojson.html">GeoJSON</a>
+    </nav>
+    <strong id="title">MapLibre-compatible map</strong>
+    <p>Public MapLibre styles rendered by microMap's <code>new Map()</code>. Right-drag or Ctrl-drag to rotate and tilt; click a feature to inspect it.</p>
+    <label>Style <select id="style" aria-label="Map style"></select><span></span></label>
+    <label for="pitch">Pitch <input id="pitch" type="range" min="0" max="85" step="1" value="60"><output id="pitch-value">60°</output></label>
+    <label for="bearing">Bearing <input id="bearing" type="range" min="-180" max="180" step="1" value="-20"><output id="bearing-value">-20°</output></label>
+    <div class="places" role="group" aria-label="Fly to">
+      <button type="button" data-place="munich">Munich</button>
+      <button type="button" data-place="paris">Paris</button>
+      <button type="button" data-place="newyork">New York</button>
+      <button type="button" data-place="tokyo">Tokyo</button>
+    </div>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+    <details>
+      <summary>The code</summary>
+      <pre><code>const map = new microMap.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  center: [11.576, 48.137], zoom: 15, pitch: 60
+});
+map.addControl(new microMap.NavigationControl());
+map.on('click', event =&gt; {
+  const features = map.queryRenderedFeatures(event.point);
+  new microMap.Popup().setLngLat(event.lngLat)
+    .setText(features.map(f =&gt; f.layer.id).join(', '))
+    .addTo(map);
+});</code></pre>
+    </details>
+  </section>
+
+  <script src="../lib/microMap.min.js"></script>
+  <script src="../lib/microMap.vector.min.js"></script>
+  <script src="../lib/microMap.geojson.min.js"></script>
+  <script src="../lib/microMap.camera.min.js"></script>
+  <script src="../lib/microMap.compose.min.js"></script>
+  <script src="../lib/microMap.ui.min.js"></script>
+  <script src="../lib/microMap.maplibre.min.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var styles = [
+        { name: 'OpenFreeMap Liberty (3D buildings)', url: 'https://tiles.openfreemap.org/styles/liberty' },
+        { name: 'OpenFreeMap Bright', url: 'https://tiles.openfreemap.org/styles/bright' },
+        { name: 'OpenFreeMap Positron', url: 'https://tiles.openfreemap.org/styles/positron' },
+        { name: 'VersaTiles Colorful', url: 'https://tiles.versatiles.org/assets/styles/colorful/style.json' },
+        { name: 'MapLibre demo tiles', url: 'https://demotiles.maplibre.org/style.json' }
+      ];
+      var places = {
+        munich: { center: [11.576, 48.137], zoom: 15.2 },
+        paris: { center: [2.2945, 48.8584], zoom: 15 },
+        newyork: { center: [-73.9855, 40.758], zoom: 15 },
+        tokyo: { center: [139.7671, 35.6812], zoom: 15 }
+      };
+      var params = new URLSearchParams(location.search);
+      var select = document.getElementById('style');
+      var status = document.getElementById('status');
+      var pitch = document.getElementById('pitch');
+      var bearing = document.getElementById('bearing');
+      styles.forEach(function (style, index) {
+        var option = document.createElement('option');
+        option.value = String(index);
+        option.textContent = style.name;
+        select.appendChild(option);
+      });
+      var selected = Math.max(0, Math.min(styles.length - 1, +(params.get('style') || 0)));
+      select.value = String(selected);
+
+      var map = new microMap.Map({
+        container: 'map',
+        style: styles[selected].url,
+        center: places.munich.center,
+        zoom: places.munich.zoom,
+        pitch: 60,
+        bearing: -20,
+        maxPitch: 85,
+        hash: true
+      });
+      window.map = map;
+      map.addControl(new microMap.maplibre.NavigationControl({ visualizePitch: true }));
+      map.addControl(new microMap.maplibre.ScaleControl());
+      map.addControl(new microMap.maplibre.FullscreenControl());
+
+      function sync() {
+        pitch.value = String(Math.round(map.getPitch()));
+        bearing.value = String(Math.round(((map.getBearing() + 180) % 360 + 360) % 360 - 180));
+        document.getElementById('pitch-value').textContent = pitch.value + '°';
+        document.getElementById('bearing-value').textContent = bearing.value + '°';
+      }
+      map.on('move', sync);
+      sync();
+      pitch.addEventListener('input', function () { map.setPitch(+pitch.value); });
+      bearing.addEventListener('input', function () { map.setBearing(+bearing.value); });
+      select.addEventListener('change', function () {
+        status.textContent = 'Loading ' + styles[+select.value].name + '…';
+        map.setStyle(styles[+select.value].url);
+        params.set('style', select.value);
+        history.replaceState(null, '', '?' + params.toString() + location.hash);
+      });
+      document.querySelectorAll('[data-place]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var place = places[button.getAttribute('data-place')];
+          map.flyTo({ center: place.center, zoom: place.zoom, pitch: 60, bearing: -20 });
+        });
+      });
+
+      map.on('style.load', function () { status.textContent = ''; });
+      map.on('idle', function () { if (!status.textContent || /Loading/.test(status.textContent)) status.textContent = 'Ready.'; });
+      map.on('error', function (event) { status.textContent = 'Error: ' + (event.error && event.error.message); });
+      map.on('click', function (event) {
+        var features = map.queryRenderedFeatures(event.point, { radius: 4 }).slice(0, 6);
+        if (!features.length) return;
+        var root = document.createElement('div');
+        features.forEach(function (feature) {
+          var line = document.createElement('div');
+          var name = feature.properties && (feature.properties.name || feature.properties['name:latin'] || feature.properties.class);
+          line.textContent = feature.layer.id + (name ? ' · ' + name : '');
+          root.appendChild(line);
+        });
+        new microMap.maplibre.Popup({ maxWidth: '260px' }).setLngLat(event.lngLat).setDOMContent(root).addTo(map);
+      });
+    }());
+  </script>
+</body>
+</html>

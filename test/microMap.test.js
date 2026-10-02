@@ -254,7 +254,109 @@ test('bearing and pitch keep camera math, markers and lifecycle events aligned',
   almostEqual(after[0], before[0]);
   almostEqual(after[1], before[1]);
   await nextFrame();
-  assert.match(container.children[0].style.transform, /scaleY\(.*\).*rotate\(-180deg\)/);
+  assert.match(container.children[0].style.transform, /matrix3d\(.*\).*rotate\(-180deg\)/);
+  map.destroy();
+});
+
+test('the perspective camera is exact at pitch 0 and inverts itself when tilted', () => {
+  const flat = microMap.createCamera({ width: 800, height: 600, bearing: 33, pitch: 0 });
+  const point = flat.project(120, -45);
+  const turn = -33 * Math.PI / 180;
+  almostEqual(point[0], 400 + 120 * Math.cos(turn) + 45 * Math.sin(turn));
+  almostEqual(point[1], 300 + 120 * Math.sin(turn) - 45 * Math.cos(turn));
+  assert.equal(point[2], 1);
+  assert.equal(flat.horizonRow, 0);
+  assert.doesNotMatch(flat.cssTransform(), /matrix3d/);
+
+  for (const pitch of [10, 45, 60, 75, 85]) {
+    for (const bearing of [0, 90, 211]) {
+      const camera = microMap.createCamera({ width: 800, height: 600, bearing, pitch });
+      // The camera distance follows MapLibre's 36.87° vertical field of view.
+      almostEqual(camera.distance, 300 / Math.tan(microMap.FOV / 2), 1e-9);
+      for (const screen of [[400, 300], [10, 590], [790, 500], [400, Math.ceil(camera.horizonRow) + 20]]) {
+        const ground = camera.unproject(screen[0], screen[1]);
+        const back = camera.project(ground[0], ground[1]);
+        almostEqual(back[0], screen[0], 1e-6);
+        almostEqual(back[1], screen[1], 1e-6);
+        // A ray through the same pixel meets a raised plane further along it.
+        const roof = camera.unprojectAt(screen[0], screen[1], 30);
+        const up = camera.project(roof[0], roof[1], 30);
+        almostEqual(up[0], screen[0], 1e-6);
+        almostEqual(up[1], screen[1], 1e-6);
+      }
+      // Ground nearer the camera is larger on screen than far ground.
+      assert.ok(camera.scaleAtRow(590) > 1 && camera.scaleAtRow(10) < 1);
+    }
+  }
+  const steep = microMap.createCamera({ width: 800, height: 600, bearing: 0, pitch: 80 });
+  assert.ok(steep.horizonRow > 100, 'a steep camera sees sky above the far row');
+  almostEqual(steep.scaleAtRow(steep.horizonRow), steep.farScale, 1e-9);
+});
+
+test('the perspective cover chooses coarser tiles towards the horizon and stays bounded', () => {
+  const level = { tileSize: 256, zoom: 14.3, centerX: 0.53, centerY: 0.35, minZoom: 0, maxZoom: 19, buffer: 0 };
+  const flat = microMap.createCamera({ width: 1024, height: 768, bearing: 0, pitch: 0 }).cover({ ...level, underlay: false });
+  assert.deepEqual([...new Set(flat.map(tile => tile.z))], [14], 'a flat view uses the rounded zoom only');
+  for (const pitch of [45, 60, 85]) {
+    const camera = microMap.createCamera({ width: 1024, height: 768, bearing: 25, pitch });
+    const tiles = camera.cover({ ...level, underlay: false });
+    const levels = [...new Set(tiles.map(tile => tile.z))].sort((a, b) => a - b);
+    assert.ok(levels.length >= 2, 'pitch ' + pitch + ' spans several levels: ' + levels);
+    assert.ok(tiles.length <= 160, 'pitch ' + pitch + ' stays bounded: ' + tiles.length);
+    // Coarse tiles sit higher on screen (farther away) than fine ones.
+    const rowOf = tile => {
+      const size = 256 * Math.pow(2, 14.3 - tile.z);
+      const world = 256 * Math.pow(2, 14.3);
+      return camera.project((tile.x + 0.5) * size - 0.53 * world, (tile.y + 0.5) * size - 0.35 * world)[1];
+    };
+    const coarse = tiles.filter(tile => tile.z === levels[0]);
+    const fine = tiles.filter(tile => tile.z === levels[levels.length - 1]);
+    const average = list => list.reduce((sum, tile) => sum + rowOf(tile), 0) / list.length;
+    assert.ok(average(coarse) < average(fine), 'pitch ' + pitch);
+    // Leaves are disjoint: no tile is an ancestor of another.
+    const keys = new Set(tiles.map(tile => tile.z + '/' + tile.x + '/' + tile.y));
+    for (const tile of tiles) {
+      for (let z = tile.z - 1; z >= levels[0]; z--) {
+        const shift = tile.z - z;
+        assert.ok(!keys.has(z + '/' + (tile.x >> shift) + '/' + (tile.y >> shift)), 'overlap at ' + tile.z + '/' + tile.x + '/' + tile.y);
+      }
+    }
+  }
+});
+
+test('a pitched raster map shows several tile levels, sky above the far row and keeps the grabbed point', async () => {
+  const { container, map } = createMap({ center: [11.5, 48.1], zoom: 13, pitch: 80, maxPitch: 85, zoomAnimation: false });
+  await nextFrame();
+  const panes = container.children[0].children;
+  assert.ok(panes.length >= 3, 'tiles of several zoom levels: ' + panes.length);
+  const sky = container.children.find(child => child.className === 'micromap-sky');
+  assert.ok(sky && /linear-gradient/.test(sky.style.cssText), 'sky and fog cover the far row');
+  map.setSky(false);
+  await nextFrame();
+  assert.equal(sky.style.display, 'none');
+
+  map.setPitch(60);
+  const from = [400, 500];
+  const grabbed = map.unproject(from);
+  container.dispatch('pointerdown', { pointerId: 3, clientX: from[0], clientY: from[1] });
+  for (let step = 1; step <= 5; step++) container.dispatch('pointermove', { pointerId: 3, clientX: from[0] - step * 30, clientY: from[1] - step * 40 });
+  container.dispatch('pointerup', { pointerId: 3, clientX: from[0] - 150, clientY: from[1] - 200 });
+  const now = map.project(grabbed);
+  almostEqual(now[0], from[0] - 150, 1e-6);
+  almostEqual(now[1], from[1] - 200, 1e-6);
+  map.destroy();
+  assert.ok(!sky.parentNode, 'destroy removes the sky');
+});
+
+test('fitBounds keeps a box inside the viewport under a tilted camera', () => {
+  const { map } = createMap({ center: [0, 0], zoom: 3, pitch: 60, bearing: 20 });
+  const box = [11.3, 47.9, 11.8, 48.3];
+  map.fitBounds(box, 20);
+  const corners = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]].map(corner => map.project(corner));
+  for (const corner of corners) {
+    assert.ok(corner[0] >= 19 && corner[0] <= 781 && corner[1] >= 19 && corner[1] <= 581, JSON.stringify(corner));
+  }
+  assert.ok(corners.some(corner => corner[0] < 30 || corner[0] > 770 || corner[1] < 30 || corner[1] > 570), 'the fit is tight');
   map.destroy();
 });
 

@@ -418,8 +418,16 @@ test('draws distinct unwrapped world copies instead of collapsing them at the ce
   map.destroy();
 });
 
-test('uses the core bearing and pitch matrix when compositing vector tiles', async () => {
-  const { map } = createMap({ zoom: 2, bearing: 45, pitch: 30 });
+// The tilted renderer's DOM: a host transformed by the camera, panes of
+// cell canvases inside it.
+function tiltedView(container) {
+  const host = container.children.find(child => child.tagName === 'DIV' && /matrix3d/.test(child.style.cssText));
+  const cells = host ? host.children.flatMap(pane => pane.children) : [];
+  return { host, cells, operations: cells.flatMap(cell => cell.context.operations) };
+}
+
+test('uses the core bearing matrix for flat views and its perspective camera when pitched', async () => {
+  const { container, map } = createMap({ zoom: 2, bearing: 45 });
   const layer = microMapVector(map, {
     tiles: '/vectors/{z}/{x}/{y}.mvt',
     tileBuffer: 0,
@@ -428,24 +436,63 @@ test('uses the core bearing and pitch matrix when compositing vector tiles', asy
   await wait();
   const operations = layer.getCanvas().getContext('2d').operations;
   assert.ok(operations.some(operation => operation[0] === 'rotate' && Math.abs(operation[1] + Math.PI / 4) < 1e-9));
-  assert.ok(operations.some(operation => operation[0] === 'scale' && operation[1] === 1 && Math.abs(operation[2] - Math.cos(Math.PI / 6)) < 1e-9));
+  assert.equal(tiltedView(container).host, undefined, 'a flat view needs no perspective host');
+
+  map.setPitch(30);
+  await wait();
+  const tilted = tiltedView(container);
+  assert.ok(tilted.host, 'a pitched view paints cells under a CSS perspective host');
+  assert.ok(tilted.host.style.cssText.endsWith('transform:' + map.getCamera().cssTransform()));
+  assert.ok(tilted.cells.length > 0);
+  assert.ok(tilted.operations.some(operation => operation[0] === 'lineTo'), 'cells hold the painted tile geometry');
 
   map.setBearing(90);
   await wait();
-  assert.ok(operations.some(operation => operation[0] === 'rotate' && Math.abs(operation[1] + Math.PI / 2) < 1e-9));
+  assert.ok(tiltedView(container).host.style.cssText.includes('rotate(-90deg)'));
+  map.setPitch(0);
+  await wait();
+  assert.equal(tiltedView(container).cells.length, 0, 'flattening releases the cells');
   map.destroy();
 });
 
 test('uses the core camera state without inferring scale through project()', async () => {
-  const { map } = createMap({ zoom: 2, bearing: 20, pitch: 15 });
-  map.project = () => { throw new Error('vector renderer should use getCameraState'); };
+  for (const pitch of [0, 15]) {
+    const { container, map } = createMap({ zoom: 2, bearing: 20, pitch });
+    map.project = () => { throw new Error('vector renderer should use getCameraState'); };
+    const layer = microMapVector(map, {
+      tiles: '/vectors/{z}/{x}/{y}.mvt',
+      tileBuffer: 0,
+      fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(fixture())) })
+    });
+    await wait();
+    const painted = pitch ? tiltedView(container).operations : layer.getCanvas().getContext('2d').operations;
+    assert.ok(painted.some(operation => operation[0] === 'lineTo'), 'pitch ' + pitch);
+    map.destroy();
+  }
+});
+
+test('the perspective cover paints near cells finer than far ones and reuses painted cells', async () => {
+  const urls = [];
+  const { container, map } = createMap({ center: [11.5, 48.1], zoom: 12, pitch: 70 });
   const layer = microMapVector(map, {
     tiles: '/vectors/{z}/{x}/{y}.mvt',
-    tileBuffer: 0,
-    fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(fixture())) })
+    maxZoom: 14,
+    fetch(url) {
+      urls.push(url);
+      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(fixture())) });
+    }
   });
-  await wait();
-  assert.ok(layer.getCanvas().getContext('2d').operations.some(operation => operation[0] === 'lineTo'));
+  await wait(40);
+  const levels = new Set(urls.map(url => +url.split('/')[2]));
+  assert.ok(levels.size >= 2, 'several levels of detail: ' + [...levels]);
+  assert.ok(Math.max(...levels) >= 12 && Math.min(...levels) < 12);
+  const view = tiltedView(container);
+  assert.ok(view.cells.length > 4);
+  const painted = view.operations.length;
+  map.setBearing(1);
+  await wait(30);
+  assert.equal(tiltedView(container).operations.length, painted, 'a small rotation repaints no cell');
+  assert.ok(layer.areTilesLoaded());
   map.destroy();
 });
 
@@ -570,7 +617,7 @@ function square(x, y, size) {
   return [9, zz(x), zz(y), 26, zz(size), 0, 0, zz(size), zz(-size), 0, 15];
 }
 
-async function drawBuildings(features, style, camera, keys = [], values = []) {
+async function drawBuildings(features, style, camera, keys = [], values = [], vectorOptions = {}) {
   const data = concat([bytesField(3, featureLayer('building', features, keys, values))]);
   const { container, map } = createMap({ center: [0.1, 0.1], zoom: 16, ...camera });
   container.clientWidth = 200;
@@ -582,7 +629,8 @@ async function drawBuildings(features, style, camera, keys = [], values = []) {
     maxZoom: 18,
     tileBuffer: 0,
     style,
-    fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) })
+    fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) }),
+    ...vectorOptions
   });
   await wait(35);
   const operations = layer.getCanvas().getContext('2d').operations.slice();
@@ -610,8 +658,13 @@ test('fill-extrusion draws lit walls below a roof when pitched, and a flat roof 
     const [r, g, b] = rgbOf(wall);
     assert.ok(r < 200 && g < 191 && b < 174, 'walls are shaded darker than their base colour: ' + wall.fillStyle);
   }
-  // Two sides of a square face the viewer at this bearing: no back walls.
-  assert.equal(walls.length, (pitched.fills.length - walls.length) * 2);
+  // A perspective camera sees one or two sides of a square, never its back.
+  const roofs = pitched.fills.length - walls.length;
+  assert.ok(walls.length >= roofs && walls.length <= roofs * 2, walls.length + ' walls for ' + roofs + ' roofs');
+  const affine = await drawBuildings(building, style, { pitch: 45, bearing: 30 }, [], [], { perspective: false });
+  affine.map.destroy();
+  const affineWalls = affine.fills.filter(fill => fill.fillStyle !== 'rgba(226,220,206,1)');
+  assert.equal(affineWalls.length, (affine.fills.length - affineWalls.length) * 2, 'the affine renderer sees two sides at this bearing');
 });
 
 test('fill-extrusion reads per-feature height from MVT properties via a get expression', async () => {
@@ -661,11 +714,11 @@ test('fill-extrusion draws buildings back to front across tiles', async () => {
 test('rotated pitched buildings use projected screen depth for roof order', async () => {
   const features = [taggedFeature(3, square(256, 256, 512)), taggedFeature(3, square(2048, 2048, 512))];
   const style = [{ sourceLayer: 'building', type: 'fill-extrusion', paint: { color: '#a05030', roofColor: '#ffffff', height: 30 } }];
-  const { map, operations } = await drawBuildings(features, style, { pitch: 60, bearing: 61 });
-  map.destroy();
+  const affine = await drawBuildings(features, style, { pitch: 60, bearing: 61 }, [], [], { perspective: false });
+  affine.map.destroy();
   const roofs = [];
   let points = [];
-  for (const operation of operations) {
+  for (const operation of affine.operations) {
     if (operation[0] === 'beginPath') points = [];
     else if (operation[0] === 'moveTo' || operation[0] === 'lineTo') points.push([operation[1], operation[2]]);
     else if (operation[0] === 'fill' && operation.fillStyle === 'rgba(255,255,255,1)' && points.length) {
@@ -678,6 +731,27 @@ test('rotated pitched buildings use projected screen depth for roof order', asyn
   for (let i = 1; i < roofs.length; i++) {
     assert.ok(roofs[i] >= roofs[i - 1] - 1e-6, 'nearer roofs must cover farther roofs at pitch 60° and bearing 61°');
   }
+
+  // Perspective: roofs are painted in order of decreasing distance from the
+  // camera's position over the ground.
+  const tilted = await drawBuildings(features, style, { pitch: 60, bearing: 61 });
+  const camera = tilted.map.getCamera();
+  const perMeter = tilted.map.getCameraState().worldSize / (40075016.68557849 * Math.cos(0.1 * Math.PI / 180));
+  const eye = [camera.distance * camera.sinPitch * camera.sinBearing, camera.distance * camera.sinPitch * camera.cosBearing];
+  const distances = [];
+  points = [];
+  for (const operation of tilted.operations) {
+    if (operation[0] === 'beginPath') points = [];
+    else if (operation[0] === 'moveTo' || operation[0] === 'lineTo') points.push([operation[1], operation[2]]);
+    else if (operation[0] === 'fill' && operation.fillStyle === 'rgba(255,255,255,1)' && points.length) {
+      const center = points.reduce((sum, point) => [sum[0] + point[0] / points.length, sum[1] + point[1] / points.length], [0, 0]);
+      const ground = camera.unprojectAt(center[0], center[1], 30 * perMeter);
+      distances.push(Math.hypot(ground[0] - eye[0], ground[1] - eye[1]));
+    }
+  }
+  tilted.map.destroy();
+  assert.ok(distances.length >= 2, 'tilted roofs render');
+  for (let i = 1; i < distances.length; i++) assert.ok(distances[i] <= distances[i - 1] + 1, 'roof ' + i + ' is not farther than the one before');
 });
 
 test('fill-extrusion treats the tile square as a seam, not as a wall', async () => {
@@ -685,9 +759,9 @@ test('fill-extrusion treats the tile square as a seam, not as a wall', async () 
   let inside = 0;
   let crossing = 0;
   for (const bearing of [30, -30]) {
-    const a = await drawBuildings([taggedFeature(3, square(3000, 1000, 900))], style, { pitch: 45, bearing });
+    const a = await drawBuildings([taggedFeature(3, square(3000, 1000, 900))], style, { pitch: 45, bearing }, [], [], { perspective: false });
     a.map.destroy();
-    const b = await drawBuildings([taggedFeature(3, square(3000, 1000, 2000))], style, { pitch: 45, bearing });
+    const b = await drawBuildings([taggedFeature(3, square(3000, 1000, 2000))], style, { pitch: 45, bearing }, [], [], { perspective: false });
     b.map.destroy();
     inside += a.fills.length;
     crossing += b.fills.length;
@@ -697,16 +771,26 @@ test('fill-extrusion treats the tile square as a seam, not as a wall', async () 
 
 test('queryRenderedFeatures finds a pitched building by its walls and roof', async () => {
   const style = [{ id: 'b3d', sourceLayer: 'building', type: 'fill-extrusion', paint: { color: '#c8bfae', height: 400 } }];
-  const { map, layer, operations } = await drawBuildings([taggedFeature(3, square(1024, 1024, 2048))], style, { pitch: 45 });
-  // The last roof drawn: its points are in the raw pass space (bearing 0).
+  // Only the centre tile holds the building, so every hit is that one.
+  const data = concat([bytesField(3, featureLayer('building', [taggedFeature(3, square(1024, 1024, 2048))]))]);
+  const empty = concat([bytesField(3, featureLayer('building', []))]);
+  const count = 65536;
+  const centre = [Math.floor((0.1 + 180) / 360 * count), Math.floor((0.5 - Math.log(Math.tan(Math.PI / 4 + 0.1 * Math.PI / 360)) / (2 * Math.PI)) * count)];
+  const { container, map } = createMap({ center: [0.1, 0.1], zoom: 16, pitch: 45 });
+  container.clientWidth = 200;
+  container.clientHeight = 200;
+  map.resize();
+  const layer = microMapVector(map, {
+    tiles: '/vectors/{z}/{x}/{y}.mvt', minZoom: 0, maxZoom: 18, tileBuffer: 0, style,
+    fetch: url => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(url === '/vectors/16/' + centre[0] + '/' + centre[1] + '.mvt' ? data : empty)) })
+  });
+  await wait(35);
+  const operations = layer.getCanvas().getContext('2d').operations;
   const end = operations.map(operation => operation[0]).lastIndexOf('fill');
   const start = operations.map(operation => operation[0]).lastIndexOf('beginPath', end);
   const points = operations.slice(start, end).filter(operation => operation[0] === 'moveTo' || operation[0] === 'lineTo');
-  const x = points.reduce((sum, point) => sum + point[1], 0) / points.length;
-  const y = points.reduce((sum, point) => sum + point[2], 0) / points.length;
-  const scale = Math.cos(Math.PI / 4);
-  const roof = [x, 100 + (y - 100) * scale];
-  assert.deepEqual(layer.queryRenderedFeatures(roof, { layers: ['b3d'] }).map(feature => feature.layer.id), ['b3d']);
+  const roof = [points.reduce((sum, point) => sum + point[1], 0) / points.length, points.reduce((sum, point) => sum + point[2], 0) / points.length];
+  assert.deepEqual(layer.queryRenderedFeatures(roof, { layers: ['b3d'] }).map(feature => feature.layer.id), ['b3d'], 'the view ray meets the roof');
   map.setPitch(0);
   await wait(35);
   assert.deepEqual(layer.queryRenderedFeatures(roof, { layers: ['b3d'], radius: 0 }), [], 'the roof point lies outside the footprint');
@@ -1199,7 +1283,8 @@ test('draws MapLibre-style symbol labels above geometry with a halo and upright 
   const operations = layer.getCanvas().getContext('2d').operations;
   const labels = operations.filter(operation => operation[0] === 'fillText').map(operation => operation[1]);
   assert.ok(labels.includes('Dingolfing'), JSON.stringify(labels));
-  assert.ok(labels.includes('Isar'), JSON.stringify(labels));
+  // A line label is drawn glyph by glyph along its line.
+  assert.ok(labels.join('').includes('Isar'), JSON.stringify(labels));
   const halo = operations.findIndex(operation => operation[0] === 'strokeText' && operation[1] === 'Dingolfing');
   const text = operations.findIndex(operation => operation[0] === 'fillText' && operation[1] === 'Dingolfing');
   assert.ok(halo >= 0 && halo < text, 'halo must be drawn before text');
@@ -1301,7 +1386,7 @@ test('generated vector distribution exports the decoder in CommonJS', () => {
 test('optional vector distribution has its own package entry and size budget', () => {
   const projectRoot = path.resolve(__dirname, '..');
   const minified = fs.readFileSync(path.join(projectRoot, 'lib/microMap.vector.min.js'));
-  assert.ok(zlib.gzipSync(minified, { level: 9 }).length < 49152);
+  assert.ok(zlib.gzipSync(minified, { level: 9 }).length < 57344);
   const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
   assert.equal(packageJson.exports['./vector'], './lib/microMap.vector.js');
   assert.ok(packageJson.files.includes('lib'));
@@ -1343,9 +1428,56 @@ test('point labels stay upright under bearing while line labels follow their lin
     return operations.slice(save, index).find(operation => operation[0] === 'rotate');
   };
   assert.equal(rotationBefore('Dingolfing'), undefined, 'a point label is not rotated with the map');
-  const roadRotation = rotationBefore('Hauptstraße');
+  // Line labels are drawn glyph by glyph; each glyph turns with the road.
+  const roadRotation = rotationBefore('H');
   assert.ok(roadRotation && Math.abs(roadRotation[1] + Math.PI / 6) < 1e-6, 'a horizontal road label turns with the map plane (-30° for bearing 30)');
+  const glyphs = operations.filter(operation => operation[0] === 'fillText').map(operation => operation[1]).join('');
+  assert.ok(glyphs.includes('Hauptstraße'), glyphs);
   map.destroy();
+});
+
+test('line labels bend with their line, respect text-max-angle and keep shaped scripts whole', async () => {
+  const zz = value => (value << 1) ^ (value >> 31);
+  // A gentle arc and a hairpin, in tile units.
+  const arc = Array.from({ length: 25 }, (_, i) => {
+    const angle = (-115 + i * 50 / 24) * Math.PI / 180;
+    return [Math.round(2048 + 2200 * Math.cos(angle)), Math.round(4300 + 2200 * Math.sin(angle))];
+  });
+  const hairpin = [[600, 1000], [2400, 1000], [2400, 1300], [600, 1300]];
+  const commands = points => [9, zz(points[0][0]), zz(points[0][1]), 8 * (points.length - 1) + 2,
+    ...points.slice(1).flatMap((point, index) => [zz(point[0] - points[index][0]), zz(point[1] - points[index][1])])];
+  async function drawn(points, name) {
+    const data = concat([bytesField(3, featureLayer('road', [taggedFeature(2, commands(points), [0, 0])], ['name'], [valueString(name)]))]);
+    const { container, map } = createMap({ center: [0, 0], zoom: 0 });
+    container.clientWidth = 256;
+    container.clientHeight = 256;
+    map.resize();
+    const layer = microMapVector(map, {
+      tiles: '/vectors/{z}/{x}/{y}.mvt', tileBuffer: 0, maxZoom: 0,
+      // The test canvas measures 0.07 em per glyph: a large size gives a long run.
+      style: [{ sourceLayer: 'road', type: 'symbol', layout: { 'text-field': ['get', 'name'], 'symbol-placement': 'line', 'text-size': 90 } }],
+      fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) })
+    });
+    await wait(35);
+    const operations = layer.getCanvas().getContext('2d').operations.slice();
+    map.destroy();
+    const texts = [];
+    for (let i = 0; i < operations.length; i++) {
+      if (operations[i][0] !== 'fillText') continue;
+      const save = operations.map(operation => operation[0]).lastIndexOf('save', i);
+      const rotate = operations.slice(save, i).find(operation => operation[0] === 'rotate');
+      texts.push({ text: operations[i][1], angle: rotate ? rotate[1] : 0 });
+    }
+    return texts;
+  }
+  const curved = await drawn(arc, 'Ringstraße');
+  assert.equal(curved.map(entry => entry.text).join(''), 'Ringstraße', 'drawn glyph by glyph');
+  const angles = curved.map(entry => entry.angle);
+  assert.ok(Math.max(...angles) - Math.min(...angles) > 0.1, 'glyphs follow the curve: ' + angles.map(a => a.toFixed(2)));
+  assert.ok(angles.every(angle => Math.abs(angle) < Math.PI / 2), 'the text stays upright');
+  assert.deepEqual(await drawn(hairpin, 'Kehre am Berg'), [], 'a hairpin exceeds text-max-angle');
+  const arabic = await drawn(arc, 'شارع');
+  assert.deepEqual(arabic.map(entry => entry.text), ['شارع'], 'a shaped script is drawn as one straight run');
 });
 
 test('point labels follow the pitched, rotated core camera', async () => {
@@ -1711,6 +1843,9 @@ async function cachedBuildings(extra = {}) {
   map.resize();
   const layer = observed.vector(map, {
     tiles: '/vectors/{z}/{x}/{y}.mvt', minZoom: 0, maxZoom: 18, tileBuffer: 0,
+    // The 2.5D image cache belongs to the affine renderer, used for map
+    // adapters without a perspective camera (or perspective: false).
+    perspective: false,
     style: [{ id: 'buildings', sourceLayer: 'building', type: 'fill-extrusion', paint: { color: '#abcdef', height: 20 } }],
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) }),
     ...extra

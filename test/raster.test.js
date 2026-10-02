@@ -155,10 +155,14 @@ test('raster requests only tiles with screen bounds intersecting the viewport', 
         const coordinate = map.unproject([x, y]);
         const lon = Array.isArray(coordinate) ? coordinate[0] : coordinate.lng;
         const lat = Array.isArray(coordinate) ? coordinate[1] : coordinate.lat;
-        const tileX = ((Math.floor((lon + 180) / 360 * 8) % 8) + 8) % 8;
-        const tileY = Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * 8);
-        assert.ok(imageURLs.includes('https://visible.test/3/' + tileX + '/' + tileY + '.png'),
-          'screen sample ' + x + ',' + y + ' must have a requested tile');
+        // A tilted view may use a coarser level for far ground.
+        const covered = [0, 1, 2, 3].some(z => {
+          const count = Math.pow(2, z);
+          const tileX = ((Math.floor((lon + 180) / 360 * count) % count) + count) % count;
+          const tileY = Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * count);
+          return imageURLs.includes('https://visible.test/' + z + '/' + tileX + '/' + tileY + '.png');
+        });
+        assert.ok(covered, 'screen sample ' + x + ',' + y + ' must have a requested tile');
       }
     }
     assertCoverage();
@@ -199,9 +203,30 @@ test('bulk raster eviction retains the most recently used source tiles', async (
   } finally { raster.destroy(); map.destroy(); }
 });
 
-test('affine raster tiles draw once without triangle clipping at bearing and pitch', async () => {
+test('perspective raster tiles are drawn as clipped triangle grids from a level-of-detail cover', async () => {
+  imageURLs.length = 0;
   const { map } = createMap();
-  map.setBearing(35); map.setPitch(50);
+  map.setBearing(35); map.setPitch(60);
+  const raster = microMapRaster(map);
+  raster.addSource('tilted', { type: 'raster', tiles: 'https://tilted.test/{z}/{x}/{y}.png', tileSize: 256 });
+  raster.addLayer({ id: 'tilted', type: 'raster', source: 'tilted' });
+  await wait();
+  const ctx = raster.getCanvas().getContext('2d');
+  ctx.operations.length = 0;
+  raster.redraw();
+  await wait();
+  const draws = ctx.operations.filter(op => op[0] === 'drawImage');
+  const clips = ctx.operations.filter(op => op[0] === 'clip');
+  assert.ok(draws.length > 0 && clips.length === draws.length, 'each triangle is clipped');
+  assert.ok(draws.length > new Set(draws.map(op => op[1])).size * 2, 'a tile is split into more than two triangles');
+  const levels = new Set(imageURLs.map(url => url.split('/')[3]));
+  assert.ok(levels.size >= 2, 'near and far tiles use different levels: ' + [...levels]);
+  raster.destroy(); map.destroy();
+});
+
+test('affine raster tiles draw once without triangle clipping at a bearing', async () => {
+  const { map } = createMap();
+  map.setBearing(35);
   const raster = microMapRaster(map);
   raster.addSource('single', { type: 'raster', tiles: 'https://single.test/{z}/{x}/{y}.png' });
   raster.addLayer({ id: 'single', type: 'raster', source: 'single' });
