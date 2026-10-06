@@ -30,14 +30,16 @@ CSS with `micromap-` class names.
   handler switches, `attributionControl`, `hash`, `transformRequest`.
   Zoom levels use MapLibre's 512 px tiles.
 - **Style loading**: style JSON by URL (relative URLs resolve against it),
-  TileJSON for vector sources, several vector sources, GeoJSON (including
-  clustering), raster/XYZ and WMS-style raster sources, sprites (`@2x` on dense
-  screens), the style's default camera, `sky`.
+  TileJSON for vector, raster and raster-dem sources, several vector sources,
+  GeoJSON inline or by URL (including clustering), raster/XYZ and WMS-style
+  raster sources, sprites (`@2x` on dense screens), the style's default camera,
+  `sky`.
 - **Style editing**: `addSource`, `getSource().setData()`, `removeSource`,
   `addLayer(layer, beforeId)`, `moveLayer`, `removeLayer`, `setPaintProperty`,
   `setLayoutProperty`, `setFilter`, `setLayerZoomRange`, `getStyle`,
   `setStyle`, `getLayersOrder`, `addImage`/`updateImage`/`removeImage`/`loadImage`.
-- **Data**: `queryRenderedFeatures(point, { layers })`,
+- **Data**: `queryRenderedFeatures()` with a point, a box of two corners or the
+  whole view, and `{ layers, filter }`,
   `querySourceFeatures(source, { sourceLayer, filter })`, `setFeatureState`,
   `getFeatureState`, `removeFeatureState`, `['feature-state', …]` in paint.
 - **Camera**: `jumpTo`, `easeTo`, `flyTo`, `panTo`, `panBy`, `zoomTo`,
@@ -61,11 +63,11 @@ CSS with `micromap-` class names.
 
 | Area | Support |
 | --- | --- |
-| Layer types | `background`, `fill`, `line`, `circle`, `symbol`, `fill-extrusion`, `raster` |
-| Not rendered (reported in `getStyleReport().skippedLayers`) | `heatmap` (use the `heatmap` module), `hillshade`, `color-relief`, `raster-dem` sources, `image`/`video`/`canvas` sources |
-| Expressions | data, zoom and feature-state expressions: `get`, `has`, `id`, `geometry-type`, `properties`, `let`/`var`, `case`, `match`, `coalesce`, `step`, `interpolate` (linear, exponential; `-hcl`/`-lab` interpolate in RGB), comparisons, `all`/`any`/`!`/`in`, type assertions and conversions, `to-rgba`, `rgb`/`rgba`, string, array (`at`, `slice`, `index-of`) and math operators, `format` (text only), `number-format`, legacy filters and functions |
+| Layer types | `background`, `fill`, `line`, `circle`, `symbol`, `fill-extrusion`, `raster`, `hillshade` and `color-relief` (`raster-dem`, Mapbox/Terrarium/custom encodings), `heatmap` |
+| Not rendered (reported in `getStyleReport().skippedLayers`) | `image`/`video`/`canvas` sources |
+| Expressions | data, zoom and feature-state expressions: `get`, `has`, `id`, `geometry-type`, `properties`, `let`/`var`, `case`, `match`, `coalesce`, `step`, `interpolate` (linear, exponential; `-hcl`/`-lab` interpolate in RGB), comparisons, `all`/`any`/`!`/`in`, type assertions and conversions, `to-rgba`, `rgb`/`rgba`, `heatmap-density`, `elevation`, string, array (`at`, `slice`, `index-of`) and math operators, `format` (text only), `number-format`, legacy filters and functions |
 | Approximated | per-section `format` fonts and colours, `text-letter-spacing`, `text-halo-blur`, `symbol-spacing`, pitch/rotation alignment, variable anchors, sort keys, `icon-text-fit`, raster colour adjustments |
-| Text | browser fonts chosen from `text-font`; `glyphs` are not downloaded. Line labels are placed along their line but not bent around curves |
+| Text | browser fonts chosen from `text-font`; `glyphs` are not downloaded. Line labels follow their line's curves glyph by glyph (respecting `text-max-angle`); scripts that need shaping (Arabic, Hebrew, Indic, Thai) stay straight |
 | Terrain, globe, light | `setTerrain`, `setProjection({ type: 'globe' })` and `setLight` are accepted and ignored with a console warning |
 
 `map._vector.getStyleReport()` lists every skipped layer and every ignored or
@@ -82,8 +84,8 @@ approximated property of the loaded style, so differences are never silent.
   MapLibre.
 - Far ground in steep views fades into fog; above the far row the sky is
   drawn from the style's `sky` (or defaults). `map.setSky(false)` disables it.
-- Labels keep a constant size with distance; MapLibre shrinks distant labels
-  slightly.
+- In tilted views labels scale with distance like MapLibre's viewport-aligned
+  symbols (half of the ground's scale change); very distant labels are left out.
 - `getCanvas()` returns the label canvas, not a single WebGL canvas. Use the
   `export` module for image export.
 

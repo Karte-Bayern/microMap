@@ -405,13 +405,15 @@ test('draws distinct unwrapped world copies instead of collapsing them at the ce
     style: [{ sourceLayer: 'transportation', type: 'line', paint: { color: '#d75d38', width: 2 } }],
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) })
   });
-  await wait();
   // Each unwrapped copy keeps its own geometry origin on the main canvas.
-  const xOrigins = new Set(
+  const origins = () => new Set(
     layer.getCanvas().getContext('2d').operations
       .filter(operation => operation[0] === 'moveTo')
       .map(operation => Math.round(operation[1]))
   );
+  // Under a loaded test runner the decode can take more than one frame.
+  for (let i = 0; i < 25 && !origins().has(448); i++) await wait();
+  const xOrigins = origins();
   assert.ok(xOrigins.has(-64), 'origins: ' + JSON.stringify([...xOrigins]));
   assert.ok(xOrigins.has(192), 'origins: ' + JSON.stringify([...xOrigins]));
   assert.ok(xOrigins.has(448), 'origins: ' + JSON.stringify([...xOrigins]));
@@ -540,6 +542,40 @@ test('queries visible MVT features in Canvas paint order with MapLibre-shaped co
   assert.equal(rotated.length, 1, 'bearing and pitch use the same hit transform as Canvas drawing');
   map.destroy();
   assert.deepEqual(layer.queryRenderedFeatures([192, 64]), []);
+});
+
+test('queries the whole view, boxes and filters like MapLibre, flat and tilted', async () => {
+  const { map } = createMap({ zoom: 0 });
+  const layer = microMapVector(map, {
+    tiles: '/vectors/{z}/{x}/{y}.mvt',
+    tileBuffer: 0,
+    style: { layers: [
+      { id: 'area-fill', sourceLayer: 'land', type: 'fill', paint: { color: '#dfe9d7' } },
+      { id: 'road-line', sourceLayer: 'road', type: 'line', paint: { color: '#d75d38', width: 4 } },
+      { id: 'poi-circle', sourceLayer: 'poi', type: 'circle', paint: { color: '#263238', radius: 6 } }
+    ] },
+    fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(queryFixture())) })
+  });
+  await wait(35);
+  const ids = features => [...new Set(features.map(feature => feature.layer.id))].sort();
+  assert.deepEqual(ids(layer.queryRenderedFeatures()), ['area-fill', 'poi-circle', 'road-line'], 'no geometry queries the whole view');
+  assert.deepEqual(ids(layer.queryRenderedFeatures({ layers: ['poi-circle'] })), ['poi-circle'], 'options alone also query the whole view');
+  // A box around the point of interest at (192, 64), clear of the area.
+  assert.deepEqual(ids(layer.queryRenderedFeatures([[180, 50], [200, 70]], { radius: 0 })), ['poi-circle', 'road-line']);
+  assert.deepEqual(ids(layer.queryRenderedFeatures([{ x: 200, y: 70 }, { x: 180, y: 50 }], { radius: 0 })), ['poi-circle', 'road-line'], 'corners in any order and as objects');
+  // A box inside the area's interior touches no vertex or edge of it.
+  assert.deepEqual(ids(layer.queryRenderedFeatures([[60, 140], [70, 150]], { radius: 0 })), ['area-fill']);
+  assert.deepEqual(layer.queryRenderedFeatures([[240, 230], [250, 250]], { radius: 0 }), []);
+  assert.deepEqual(ids(layer.queryRenderedFeatures(undefined, { filter: ['==', ['get', 'kind'], 'road'] })), ['road-line'], 'filter selects features');
+  assert.throws(() => layer.queryRenderedFeatures(undefined, { filter: ['nonsense'] }), /query filter/);
+  map.setPitch(45);
+  await wait(35);
+  const poi = layer.queryRenderedFeatures([10, 10], { layers: ['poi-circle'], radius: 64 });
+  const target = map.project(layer.queryRenderedFeatures({ layers: ['poi-circle'] })[0].geometry.coordinates);
+  const tilted = layer.queryRenderedFeatures([[target[0] - 4, target[1] - 4], [target[0] + 4, target[1] + 4]], { layers: ['poi-circle'], radius: 0 });
+  assert.equal(tilted.length, 1, 'a box around the projected point finds it in a tilted view');
+  assert.equal(poi.length, 0);
+  map.destroy();
 });
 
 test('stays empty below a vector source minZoom instead of allocating an impossible tile grid', async () => {
@@ -1386,7 +1422,7 @@ test('generated vector distribution exports the decoder in CommonJS', () => {
 test('optional vector distribution has its own package entry and size budget', () => {
   const projectRoot = path.resolve(__dirname, '..');
   const minified = fs.readFileSync(path.join(projectRoot, 'lib/microMap.vector.min.js'));
-  assert.ok(zlib.gzipSync(minified, { level: 9 }).length < 57344);
+  assert.ok(zlib.gzipSync(minified, { level: 9 }).length < 65536);
   const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
   assert.equal(packageJson.exports['./vector'], './lib/microMap.vector.js');
   assert.ok(packageJson.files.includes('lib'));

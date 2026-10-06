@@ -20,10 +20,10 @@ const builds = [
     sourceUrl: new URL('../lib/microMap.vector.js', import.meta.url),
     outputUrl: new URL('../lib/microMap.vector.min.js', import.meta.url),
     banner: '/*! microMap.vector.js v' + packageJson.version + ' | MIT */',
-    // MVT decoding, style evaluation, labels, the perspective (tilted)
-    // renderer and WebGL buildings remain separate from the raster core.
-    // Budget: 56 KiB minified + gzip.
-    budget: 57344
+    // MVT decoding, style evaluation, curved labels, the perspective
+    // (tilted) renderer, WebGL buildings, hillshade and heatmaps remain
+    // separate from the raster core. Budget: 64 KiB minified + gzip.
+    budget: 65536
   },
   {
     name: 'geojson',
@@ -221,14 +221,14 @@ const bundles = [
     outputUrl: new URL('../dist/micromap.min.js', import.meta.url),
     format: 'iife',
     globalName: 'microMap',
-    budget: 122880
+    budget: 131072
   },
   {
     name: 'bundle-esm',
     entry: new URL('./bundle/module.mjs', import.meta.url),
     outputUrl: new URL('../dist/micromap.mjs', import.meta.url),
     format: 'esm',
-    budget: 122880
+    budget: 131072
   },
   {
     name: 'bundle-cjs',

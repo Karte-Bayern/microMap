@@ -35,7 +35,7 @@ declare namespace maplibre {
 
   interface LayerSpecification {
     id: string;
-    type: 'background' | 'fill' | 'line' | 'symbol' | 'circle' | 'fill-extrusion' | 'raster' | 'heatmap' | 'hillshade' | string;
+    type: 'background' | 'fill' | 'line' | 'symbol' | 'circle' | 'fill-extrusion' | 'raster' | 'heatmap' | 'hillshade' | 'color-relief' | string;
     source?: string;
     'source-layer'?: string;
     minzoom?: number;
@@ -158,6 +158,13 @@ declare namespace maplibre {
     maxDuration?: number;
   }
 
+  interface QueryRenderedFeaturesOptions {
+    layers?: string[];
+    filter?: FilterSpecification;
+    /** Extra hit tolerance in pixels around points and lines (default 3). */
+    radius?: number;
+  }
+
   interface MapMouseEvent {
     type: string;
     target: Map;
@@ -215,7 +222,9 @@ declare namespace maplibre {
     hasImage(id: string): boolean;
     listImages(): string[];
     loadImage(url: string): Promise<{ data: HTMLImageElement }>;
-    queryRenderedFeatures(point?: PointLike, options?: { layers?: string[]; radius?: number }): MapGeoJSONFeature[];
+    /** Features under a point, inside a box of two corners, or in the whole view. */
+    queryRenderedFeatures(geometry?: PointLike | [PointLike, PointLike], options?: QueryRenderedFeaturesOptions): MapGeoJSONFeature[];
+    queryRenderedFeatures(options?: QueryRenderedFeaturesOptions): MapGeoJSONFeature[];
     querySourceFeatures(sourceId: string, options?: { sourceLayer?: string; filter?: FilterSpecification }): MapGeoJSONFeature[];
     setSky(sky: SkySpecification | null): this;
     getSky(): microMap.SkyOptions | false;

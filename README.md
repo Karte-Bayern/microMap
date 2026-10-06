@@ -1,5 +1,10 @@
 # microMap.js
 
+The open-source map engine of [Karte.Bayern](https://karte.bayern/), a
+privately and independently run project from Bavaria for maps, place search,
+navigation and regional information. microMap keeps the map layer small and
+inspectable, so data, renderer and tile source stay under your control.
+
 A lightweight, dependency-free JavaScript map library with a **MapLibre-shaped
 API for a documented subset of MapLibre GL JS**. It renders MapLibre style
 documents (vector, GeoJSON and raster sources, sprites, expressions) with a
@@ -38,7 +43,7 @@ map.on('load', () => {
   depth buffer (Canvas 2D fallback). Raster, vector, GeoJSON, markers and hit
   testing share one camera.
 - **Small and modular.** Import only what you use: the raster core is 16 KB,
-  the style renderer 53 KB, UI 14 KB. No runtime dependencies, no build step
+  the style renderer 62 KB, UI 14 KB. No runtime dependencies, no build step
   required, plain `<script>` tags work.
 - **Works without a GPU.** Map tiles are painted with Canvas 2D and composited
   by the browser; WebGL is only an accelerator for 3D buildings.
@@ -52,8 +57,9 @@ map.on('load', () => {
 | Runtime dependencies | none | several |
 | Rendering | Canvas 2D tiles, CSS 3D compositing, WebGL for buildings | WebGL / WebGPU |
 | Perspective pitch | up to 85°, sky and fog | up to 85°, sky, fog, terrain |
-| Globe projection, terrain, hillshade | not yet | yes |
-| Text | browser fonts (straight labels along lines) | SDF glyphs, curved labels |
+| Hillshade, colour relief (`raster-dem`) | yes | yes |
+| Globe projection, 3D terrain | not yet | yes |
+| Text | browser fonts, labels curved along lines | SDF glyphs, curved labels |
 
 ## Install
 
@@ -112,5 +118,7 @@ and are not part of the source repository. After editing `lib/`, run
 `test/` or `demo/` page in a browser: automated tests use simulated DOM and
 Canvas APIs and verify behaviour, not pixels.
 
-Maintained by [Simon Waldherr](https://github.com/SimonWaldherr/).
-[MIT license](LICENSE); map data and imagery have separate licenses.
+microMap.js is developed in the [Karte.Bayern](https://karte.bayern/) project
+([GitHub](https://github.com/Karte-Bayern)) and maintained by
+[Simon Waldherr](https://github.com/SimonWaldherr/). Issues and contributions
+are welcome. [MIT license](LICENSE); map data and imagery have separate licenses.

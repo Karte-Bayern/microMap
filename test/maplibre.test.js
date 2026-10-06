@@ -155,14 +155,14 @@ function style() {
       base: { type: 'vector', url: 'https://tiles.test/tiles.json' },
       extra: { type: 'vector', tiles: ['https://extra.test/{z}/{x}/{y}.pbf'], maxzoom: 10 },
       places: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
-      dem: { type: 'raster-dem', tiles: ['https://dem.test/{z}/{x}/{y}.png'] }
+      picture: { type: 'image', url: 'https://image.test/plan.png', coordinates: [[11, 48.2], [11.2, 48.2], [11.2, 48], [11, 48]] }
     },
     sky: { 'sky-color': '#123456' },
     layers: [
       { id: 'background', type: 'background', paint: { 'background-color': '#f0ede5' } },
       { id: 'roads', type: 'line', source: 'base', 'source-layer': 'roads', paint: { 'line-color': '#c00', 'line-width': 4 } },
       { id: 'extra-roads', type: 'line', source: 'extra', 'source-layer': 'roads', paint: { 'line-color': '#00c' } },
-      { id: 'hills', type: 'hillshade', source: 'dem' }
+      { id: 'plan', type: 'raster', source: 'picture' }
     ]
   };
 }
@@ -199,7 +199,7 @@ test('new Map() loads a whole MapLibre style and fires its lifecycle events in o
   assert.equal(map.getZoom(), 9);
   assert.ok(requests.some(url => url.startsWith('https://tiles.test/9/')), 'the base source loads through its TileJSON');
   assert.ok(requests.some(url => url.startsWith('https://extra.test/9/')), 'a second vector source loads too');
-  assert.deepEqual(map._vector.getStyleReport().skippedLayers, ['hills'], 'unsupported sources are reported, not fatal');
+  assert.deepEqual(map._vector.getStyleReport().skippedLayers, ['plan'], 'unsupported sources are reported, not fatal');
   assert.equal(map.getSky().skyColor, '#123456');
   assert.deepEqual(map.getStyle().layers.map(layer => layer.id), ['background', 'roads', 'extra-roads']);
   map.remove();

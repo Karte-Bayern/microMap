@@ -3,9 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>microMap.js — Simon Waldherr</title>
+  <title>microMap.js · Small maps, sovereign by design</title>
   <meta name="author" content="Simon Waldherr">
-  <meta name="description" content="A small map engine by Simon Waldherr. Explore spatial data, routing and scenario demos with a dependency-free JavaScript core and optional modules.">
+  <meta name="description" content="A small, dependency-free JavaScript map engine for pages that keep their data, renderer and tile source under control.">
+  <link rel="canonical" href="https://karte-bayern.github.io/microMap/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="microMap.js · Small maps, sovereign by design">
+  <meta property="og:description" content="A small map for a page, a big step for Sovereignty. A dependency-free JavaScript map engine with optional modules.">
+  <meta property="og:url" content="https://karte-bayern.github.io/microMap/">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231769e0'/%3E%3Cpath d='M16 6c-4.4 0-8 3.4-8 7.7C8 19.5 16 26 16 26s8-6.5 8-12.3C24 9.4 20.4 6 16 6zm0 10.5a2.9 2.9 0 1 1 0-5.8 2.9 2.9 0 0 1 0 5.8z' fill='%23fff'/%3E%3C/svg%3E">
   <style>
     :root {
@@ -58,6 +63,7 @@
     h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.08; margin: 0 0 16px; letter-spacing: -.02em; }
     h1 span { color: var(--accent); }
     .lead { font-size: 18px; color: var(--muted); margin: 0 0 24px; max-width: 34em; }
+    .slogan { margin: -3px 0 20px; padding-left: 14px; border-left: 3px solid var(--accent-2); color: var(--text); font: 600 italic 17px/1.45 Georgia, "Times New Roman", serif; max-width: 30em; }
     .cta { display: flex; flex-wrap: wrap; gap: 10px; }
     .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-weight: 600; text-decoration: none;
       border: 1px solid var(--line); color: var(--text); background: var(--surface); }
@@ -177,6 +183,7 @@
     .eyebrow { font-size: 12px; letter-spacing: .045em; padding: 5px 11px; margin-bottom: 20px; }
     h1 { max-width: 15ch; font-size: clamp(42px, 4.5vw, 64px); line-height: 1.04; letter-spacing: -.047em; margin-bottom: 20px; }
     .lead { max-width: 31em; font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; margin-bottom: 24px; }
+    .slogan { font-size: clamp(16px, 1.35vw, 18px); margin-bottom: 22px; }
     .cta { gap: 12px; align-items: center; }
     .btn { min-height: 48px; padding: 11px 18px; border-radius: 11px; transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease; }
     .btn:hover { transform: translateY(-1px); }
@@ -227,6 +234,7 @@
       .hero { padding: 36px 0 30px; }
       h1 { max-width: 15ch; font-size: clamp(38px, 10vw, 54px); }
       .lead { font-size: 17px; }
+      .slogan { margin-top: -2px; margin-bottom: 20px; font-size: 16px; }
       .hero-proof { gap: 10px 8px; }
       .proof-item { align-items: flex-start; flex-direction: column; gap: 7px; }
       .proof-icon { flex-basis: 34px; width: 34px; height: 34px; border-radius: 10px; }
@@ -264,16 +272,17 @@
     <div class="hero">
       <div class="wrap">
         <div>
-          <span class="eyebrow">A project by Simon Waldherr · MIT licensed</span>
+          <span class="eyebrow">Part of the Karte.Bayern project · Open source · MIT licensed</span>
           <h1>JavaScript maps. <span>A small core with optional modules.</span></h1>
+          <p class="slogan">A small map for a page, a big step for Sovereignty.</p>
           <p class="lead">A dependency-free JavaScript map engine for exploring spatial data, routing and scenarios. Start with the raster core and add vector tiles, GeoJSON or UI controls as needed.</p>
           <div class="cta">
             <a class="btn primary" href="bench/browser.html">Try the interactive map <span aria-hidden="true">→</span></a>
             <a class="btn" href="#start">See the setup</a>
           </div>
           <div class="hero-proof" aria-label="At a glance">
-            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v8.5"/></svg></span><span class="proof-copy"><b>12.6 kB</b><span>raster core · gzip</span></span></div>
-            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></svg></span><span class="proof-copy"><b>56.3 kB</b><span>core + MVT · gzip</span></span></div>
+            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v8.5"/></svg></span><span class="proof-copy"><b>15.6 kB</b><span>raster core · gzip</span></span></div>
+            <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></svg></span><span class="proof-copy"><b>77.2 kB</b><span>core + MVT · gzip</span></span></div>
             <div class="proof-item"><span class="proof-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="proof-copy"><b>Your tile source</b><span>MIT · zero runtime dependencies</span></span></div>
           </div>
         </div>
@@ -319,16 +328,16 @@
 &lt;/script&gt;</code></pre>
         </div>
         <div class="size-ladder" aria-label="Choose a bundle size">
-          <div class="size-step"><span>Raster core<small>Raster tiles and camera</small></span><b>12.6 kB</b></div>
-          <div class="size-step"><span>Core + MVT<small>Vector tiles and styles</small></span><b>56.3 kB</b></div>
+          <div class="size-step"><span>Raster core<small>Raster tiles and camera</small></span><b>15.6 kB</b></div>
+          <div class="size-step"><span>Core + MVT<small>Vector tiles and styles</small></span><b>77.2 kB</b></div>
         </div>
       </div>
     </section>
 
     <section id="project" aria-labelledby="project-title">
       <div class="wrap">
-        <h2 id="project-title">Data, small tools and practical questions</h2>
-        <p class="sub">I'm <a href="https://github.com/SimonWaldherr/" rel="author">Simon Waldherr</a>. My work spans data analysis, web development and volunteer firefighting. microMap brings those interests together in a small, inspectable map engine. These examples are a good place to explore it.</p>
+        <h2 id="project-title">Built in the Karte.Bayern project</h2>
+        <p class="sub">microMap.js is the open-source map engine of <a href="https://karte.bayern/">Karte.Bayern</a>, a privately and independently run project from Bavaria for maps, place search, navigation and regional information. It keeps the map layer small and inspectable, so data, renderer and tile source stay under the operator's control. The project is maintained by <a href="https://github.com/SimonWaldherr/" rel="author">Simon Waldherr</a>; contributions are welcome on <a href="https://github.com/Karte-Bayern/microMap">GitHub</a>. These examples show what it is used for.</p>
         <div class="grid">
           <article class="card">
             <h3>Explore data on a map</h3>
@@ -383,83 +392,88 @@
         <p class="sub">Every map needs the core; add only the files for features you use. Each card names its required files and the total size for that combination.</p>
         <div class="module-core">
           <div><h3>1. Core — required for every map</h3><p>Raster map, camera gestures, keyboard controls, basic markers and local feature search.</p><code>microMap.min.js</code></div>
-          <div class="module-size"><span>Core size · minified + gzip</span><strong>12.6 kB</strong></div>
+          <div class="module-size"><span>Core size · minified + gzip</span><strong>15.6 kB</strong></div>
         </div>
         <div class="module-grid">
           <article class="module-card">
-            <h3>Vector maps &amp; styles</h3><p>MVT tiles, light/dark starter palettes, custom colors, a MapLibre Style subset, sprites, patterns, clustering and feature state.</p>
+            <h3>Vector maps &amp; styles</h3><p>MVT tiles and MapLibre styles with perspective 3D buildings, curved labels, hillshade, colour relief and heatmaps, sprites, patterns, clustering and feature state.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.vector.min.js</code></div>
-            <div class="module-sizes"><span>+43.4 kB · total with core</span><strong>56.3 kB</strong></div>
+            <div class="module-sizes"><span>+61.6 kB · total with core</span><strong>77.2 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Markers, popups &amp; controls</h3><p>Draggable markers, popups, tooltips and controls with CSS theme variables.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.ui.min.js</code></div>
-            <div class="module-sizes"><span>+13.5 kB · total with core</span><strong>26.2 kB</strong></div>
+            <div class="module-sizes"><span>+13.6 kB · total with core</span><strong>29.2 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Dynamic GeoJSON</h3><p>Draw and update application data such as routes, areas and points.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.geojson.min.js</code></div>
-            <div class="module-sizes"><span>+8.2 kB · total with core</span><strong>20.8 kB</strong></div>
+            <div class="module-sizes"><span>+8.3 kB · total with core</span><strong>23.9 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Map annotations</h3><p>Add and edit points, lines or areas. Undo changes and exchange GeoJSON.</p>
             <div class="module-file"><span>Requires core + GeoJSON, then add</span><code>microMap.field.min.js</code></div>
-            <div class="module-sizes"><span>+2.6 kB · total for all three</span><strong>23.4 kB</strong></div>
+            <div class="module-sizes"><span>+2.6 kB · total for all three</span><strong>26.5 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Map measurements</h3><p>Measure air distance, circles and areas, or a shortest path in your graph.</p>
             <div class="module-file"><span>Requires core + GeoJSON, then add</span><code>microMap.measure.min.js</code></div>
-            <div class="module-sizes"><span>+3.8 kB · total for all three</span><strong>24.6 kB</strong></div>
+            <div class="module-sizes"><span>+3.8 kB · total for all three</span><strong>27.7 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>GeoJSON inspection</h3><p>Find malformed coordinates, rings and oversized imports before loading data.</p>
             <div class="module-file"><span>Add this file to an upload workflow</span><code>microMap.inspect.min.js</code></div>
-            <div class="module-sizes"><span>+1.7 kB · total with core</span><strong>14.4 kB</strong></div>
+            <div class="module-sizes"><span>+1.7 kB · total with core</span><strong>17.3 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Weighted heatmaps</h3><p>Explore point density with weights and an optional time filter.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.heatmap.min.js</code></div>
-            <div class="module-sizes"><span>+2.5 kB · total with core</span><strong>15.2 kB</strong></div>
+            <div class="module-sizes"><span>+2.6 kB · total with core</span><strong>18.2 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Scenario timelines</h3><p>Replay time-based entities and events for simulations, games, logistics and training.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.scenario.min.js</code></div>
-            <div class="module-sizes"><span>+3.2 kB · total with core</span><strong>15.8 kB</strong></div>
+            <div class="module-sizes"><span>+3.2 kB · total with core</span><strong>18.8 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Network routing</h3><p>Find weighted routes and reachable areas with access modes and closures.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.network.min.js</code></div>
-            <div class="module-sizes"><span>+3.2 kB · total with core</span><strong>15.8 kB</strong></div>
+            <div class="module-sizes"><span>+3.2 kB · total with core</span><strong>18.9 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>PNG &amp; print export</h3><p>Save the current map view with loaded tiles, canvas overlays and attribution.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.export.min.js</code></div>
-            <div class="module-sizes"><span>+1.8 kB · total with core</span><strong>14.4 kB</strong></div>
+            <div class="module-sizes"><span>+1.8 kB · total with core</span><strong>17.4 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>PMTiles archives</h3><p>Read local or hosted PMTiles v3 archives on demand for raster or MVT maps.</p>
             <div class="module-file"><span>Add this file and a renderer</span><code>microMap.pmtiles.min.js</code></div>
-            <div class="module-sizes"><span>+3.3 kB on top of your map</span><strong>Total varies</strong></div>
+            <div class="module-sizes"><span>+3.0 kB on top of your map</span><strong>Total varies</strong></div>
           </article>
           <article class="module-card">
             <h3>Camera animations</h3><p>Use <code>flyTo</code>, <code>easeTo</code>, <code>jumpTo</code> and <code>fitBounds</code>.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.camera.min.js</code></div>
-            <div class="module-sizes"><span>+3.9 kB · total with core</span><strong>16.5 kB</strong></div>
+            <div class="module-sizes"><span>+4.4 kB · total with core</span><strong>20.0 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>Extra raster layers</h3><p>Add additional XYZ or WMS sources, for example an aerial photo overlay.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.raster.min.js</code></div>
-            <div class="module-sizes"><span>+4.0 kB · total with core</span><strong>16.7 kB</strong></div>
+            <div class="module-sizes"><span>+4.7 kB · total with core</span><strong>20.3 kB</strong></div>
           </article>
           <article class="module-card">
             <h3>WebGL surface</h3><p>Provide a custom GPU renderer on a WebGL canvas alongside the map.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.webgl.min.js</code></div>
-            <div class="module-sizes"><span>+1.4 kB · total with core</span><strong>14.1 kB</strong></div>
+            <div class="module-sizes"><span>+1.4 kB · total with core</span><strong>17.0 kB</strong></div>
           </article>
           <article class="module-card module-facade">
             <h3>One combined API</h3><p>Use one facade to connect the core with whichever optional modules you selected.</p>
             <div class="module-file"><span>Add this file</span><code>microMap.compose.min.js</code></div>
-            <div class="module-sizes"><span>+5.0 kB on top of your selection</span><strong>Total varies</strong></div>
+            <div class="module-sizes"><span>+5.1 kB on top of your selection</span><strong>Total varies</strong></div>
+          </article>
+          <article class="module-card module-facade">
+            <h3>MapLibre-compatible map</h3><p><code>new Map({ container, style })</code>, MapLibre's events, markers, popups and controls. Or load everything at once from <code>dist/micromap.min.js</code> (122.7 kB).</p>
+            <div class="module-file"><span>Requires vector, GeoJSON, camera, compose and UI, then add</span><code>microMap.maplibre.min.js</code></div>
+            <div class="module-sizes"><span>+6.2 kB · total with all of them</span><strong>114.8 kB</strong></div>
           </article>
         </div>
         <p class="module-note">Load only the modules your map needs. Sizes are separate JavaScript files compressed with gzip level 9.</p>
@@ -519,7 +533,7 @@
 
   <footer>
     <div class="wrap">
-      <span>microMap.js · by <a href="https://github.com/SimonWaldherr/" rel="author">Simon Waldherr</a> · MIT licensed · <a href="https://simonwaldherr.de/">Personal site</a></span>
+      <span>microMap.js · a <a href="https://karte.bayern/">Karte.Bayern</a> project · maintained by <a href="https://github.com/SimonWaldherr/" rel="author">Simon Waldherr</a> · MIT licensed · <a href="https://github.com/Karte-Bayern/microMap">Source code</a></span>
       <span>Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · vector sources: <a href="https://karte.bayern/">Karte.Bayern</a> / <a href="https://openfreemap.org/">OpenFreeMap</a></span>
     </div>
   </footer>

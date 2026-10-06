@@ -112,8 +112,7 @@ tests and add-ons.
 - MapLibre Style v8 support covers the commonly used layer types, sources and
   expressions; see the [migration guide](maplibre.md). Inspect
   `vectors.getStyleReport()` for unsupported or approximated features. Fonts use
-  browser fonts instead of glyph-PBF atlases; road labels are not bent around
-  curves.
+  browser fonts instead of glyph-PBF atlases.
 - The separate GeoJSON overlay supports a smaller expression set and draws on its
   own canvas. Use vector-owned GeoJSON for ordering among basemap layers.
 - The library does not supply tile hosting, geocoding, road data or offline package

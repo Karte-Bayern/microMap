@@ -54,6 +54,24 @@ class RecordingContext {
   }
   fillText(text, x, y) { this.ops.push({ op: 'text', text, x, y, font: this.font, fillStyle: this.fillStyle, textAlign: this.textAlign, textBaseline: this.textBaseline }); }
   strokeText() {}
+  // Pixels read back are a Terrarium DEM rising 30 m per pixel eastwards.
+  getImageData(x, y, width, height) {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let row = 0; row < height; row++) for (let column = 0; column < width; column++) {
+      const metres = 32768 + column * 30;
+      const o = 4 * (row * width + column);
+      data[o] = Math.floor(metres / 256);
+      data[o + 1] = metres % 256;
+      data[o + 3] = 255;
+    }
+    return { data, width, height };
+  }
+  createImageData(width, height) { return { data: new Uint8ClampedArray(width * height * 4), width, height }; }
+  putImageData(image) {
+    let shaded = 0;
+    for (let i = 3; i < image.data.length; i += 4) if (image.data[i] > 0) shaded++;
+    this.ops.push({ op: 'putImageData', width: image.width, shaded });
+  }
 }
 
 class FakeElement {
@@ -763,6 +781,30 @@ test('draws raster sources at their style position with parent fallback and boun
   map.destroy();
 });
 
+test('a failed raster tile shows its nearest parent with data, loaded on demand', async () => {
+  FakeElement.images = [];
+  const style = {
+    version: 8,
+    sources: { base: { type: 'vector', tiles: ['/{z}/{x}/{y}.mvt'] }, sat: { type: 'raster', tiles: ['/sat/{z}/{x}/{y}.webp'], tileSize: 256, maxzoom: 4 } },
+    layers: [{ id: 'sat', type: 'raster', source: 'sat' }]
+  };
+  // Like a source without data at z2 (404s beyond its coverage).
+  const transformRequest = url => url.replace(/\/sat\/2\/(\d+)\/(\d+)\.webp$/, '/sat/2/$1/$2-fail.webp');
+  const { map, layer, context } = setup(style, roads, { zoom: 1, tileSize: 512 }, { transformRequest });
+  for (let i = 0; i < 50 && !layer.areTilesLoaded(); i++) await wait(10);
+  assert.ok(FakeElement.images.some(url => /^\/sat\/2\/.*-fail/.test(url)));
+  assert.ok(FakeElement.images.some(url => /^\/sat\/1\//.test(url)), 'parents are requested: ' + FakeElement.images.join(' '));
+  assert.ok(!FakeElement.images.some(url => /^\/sat\/0\//.test(url)), 'no further than the first parent with data');
+  context.ops.length = 0;
+  map.setBearing(1);
+  await wait(30);
+  const draws = context.ops.filter(op => op.op === 'drawImage');
+  assert.ok(draws.length && draws.every(op => /\/sat\/1\//.test(op.src) && op.args.length === 8), draws.map(op => op.src).join(' '));
+  assert.ok(layer.areTilesLoaded());
+  layer.destroy();
+  map.destroy();
+});
+
 test('adds and removes a WMS raster source through compose in style order', async () => {
   const microMapCompose = require('../lib/microMap.compose.js');
   FakeElement.images = [];
@@ -823,4 +865,191 @@ test('MapLibre expressions beyond the basics: colours, arrays, text and math', (
   assert.ok(Math.abs(evaluate(['sin', ['/', ['pi'], 2]]) - 1) < 1e-12);
   assert.equal(evaluate(['number-format', 1234.5, { locale: 'en-US', 'max-fraction-digits': 0 }]), '1,235');
   assert.equal(evaluate(['interpolate-hcl', ['linear'], ['zoom'], 0, 0, 20, 10]), 5);
+});
+
+test('legacy zoom functions with tokens switch text at their stops', () => {
+  const vector = require('../lib/microMap.vector.js');
+  const field = { stops: [[2, '{ABBREV}'], [4, '{NAME}']] };
+  const properties = { ABBREV: 'Ger.', NAME: 'Germany' };
+  const at = zoom => vector.evaluateExpression(field, { property: 'text-field', properties, zoom });
+  assert.equal(at(3.9), 'Ger.', 'string outputs step instead of interpolating');
+  assert.equal(at(4), 'Germany');
+  assert.equal(vector.evaluateExpression('{NAME} ({ABBREV})', { property: 'text-field', properties }), 'Germany (Ger.)');
+  assert.equal(vector.evaluateExpression({ stops: [[0, 2], [10, 12]] }, { property: 'line-width', zoom: 5 }), 7, 'numbers still interpolate');
+});
+
+test('hillshade lights slopes facing the illumination and leaves flat ground clear', () => {
+  const vector = require('../lib/microMap.vector.js');
+  const size = 16;
+  const terrarium = [256, 1, 1 / 256, 32768];
+  // Elevation rising to the east (a west-facing slope) or to the west.
+  function dem(rise) {
+    const data = new Uint8ClampedArray(size * size * 4);
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      const metres = 32768 + rise(x, y);
+      const o = 4 * (y * size + x);
+      data[o] = Math.floor(metres / 256);
+      data[o + 1] = Math.floor(metres) % 256;
+      data[o + 2] = Math.round((metres % 1) * 256);
+      data[o + 3] = 255;
+    }
+    return data;
+  }
+  // Light from the west.
+  const settings = { direction: 270, exaggeration: 0.5, shadow: [0, 0, 0, 1], highlight: [255, 255, 255, 1], accent: [0, 0, 0, 1] };
+  const shade = rise => vector.shadeDEM(dem(rise), size, 12, 1400, terrarium, settings);
+  const brightness = data => data[4 * (8 * size + 8)] * data[4 * (8 * size + 8) + 3] / 255;
+  const westFacing = shade(x => x * 40);
+  const eastFacing = shade(x => -x * 40);
+  assert.ok(brightness(westFacing) > brightness(eastFacing) + 20, 'light from the west: ' + brightness(westFacing) + ' vs ' + brightness(eastFacing));
+  assert.ok(westFacing[4 * (8 * size + 8) + 3] > 0, 'slopes are shaded');
+  const flat = shade(() => 500);
+  assert.equal(flat[4 * (8 * size + 8) + 3], 0, 'flat ground stays transparent');
+});
+
+test('hillshade layers shade raster-dem tiles in style order, flat and tilted', async () => {
+  FakeElement.images = [];
+  const style = {
+    version: 8,
+    sources: {
+      base: { type: 'vector', tiles: ['/{z}/{x}/{y}.mvt'] },
+      dem: { type: 'raster-dem', tiles: ['/dem/{z}/{x}/{y}.png'], encoding: 'terrarium', tileSize: 256, maxzoom: 4 }
+    },
+    layers: [
+      { id: 'land', type: 'fill', source: 'base', 'source-layer': 'building', paint: { 'fill-color': '#aa0000' } },
+      { id: 'hills', type: 'hillshade', source: 'dem', paint: { 'hillshade-exaggeration': 0.6 } },
+      { id: 'roads', type: 'line', source: 'base', 'source-layer': 'transportation', paint: { 'line-color': '#00aa00' } }
+    ]
+  };
+  const { map, layer, context } = setup(style, roads, { zoom: 1, tileSize: 512 });
+  await wait(80);
+  assert.deepEqual(layer.getStyleReport().skippedLayers, []);
+  assert.ok(FakeElement.images.some(url => /^\/dem\/2\//.test(url)), 'DEM tiles at the 256px level: ' + FakeElement.images.join(' '));
+  const order = context.ops.map(op => op.op === 'fill' ? op.fillStyle : op.op === 'stroke' ? op.strokeStyle : op.op === 'drawImage' ? (op.src ? 'image' : 'shade') : null).filter(Boolean);
+  assert.ok(order.includes('shade'), 'shaded canvases are drawn: ' + order.join(' '));
+  assert.ok(order.indexOf('#aa0000') < order.indexOf('shade') && order.indexOf('shade') < order.lastIndexOf('#00aa00'), order.join(' '));
+  assert.ok(!order.includes('image'), 'the raw elevation image itself is never drawn');
+  // Tilted: cells paint the same shading into their own canvases.
+  map.setPitch(50);
+  // Shading has a per-frame time budget: give the cells a few dozen frames.
+  for (let i = 0; i < 200 && !layer.areTilesLoaded(); i++) await wait(20);
+  const stats = layer.getRenderStats();
+  assert.equal(stats.mode, 'tilted');
+  assert.ok(stats.cells > 0 && stats.painted === stats.cells && stats.incomplete === 0, JSON.stringify(stats));
+  assert.ok(layer.areTilesLoaded());
+  layer.destroy();
+  map.destroy();
+});
+
+test('color-relief colours elevation by its stops, as MapLibre samples them', () => {
+  const vector = require('../lib/microMap.vector.js');
+  const terrarium = [256, 1, 1 / 256, 32768];
+  const dem = (...metres) => {
+    const data = new Uint8ClampedArray(metres.length * 4);
+    metres.forEach((value, i) => {
+      const encoded = 32768 + value;
+      data.set([Math.floor(encoded / 256), Math.floor(encoded) % 256, Math.round((encoded % 1) * 256), 255], 4 * i);
+    });
+    return data;
+  };
+  const pixel = (data, i) => Array.from(data.slice(4 * i, 4 * i + 4));
+  const relief = (color, ...metres) => vector.reliefDEM(dem(...metres), terrarium, { type: 'color-relief', paint: { 'color-relief-color': color } });
+  const ramp = ['interpolate', ['linear'], ['elevation'], 0, '#000000', 1000, '#ff0000', 2000, 'rgba(0, 0, 255, 0)'];
+  const out = relief(ramp, -500, 0, 500, 1000, 1500, 3000);
+  assert.deepEqual(pixel(out, 0), [0, 0, 0, 255], 'held below the first stop');
+  assert.deepEqual(pixel(out, 2), [128, 0, 0, 255], 'linear between stops');
+  assert.deepEqual(pixel(out, 3), [255, 0, 0, 255]);
+  // Premultiplied blending: fading out keeps the colour, not a grey.
+  assert.deepEqual(pixel(out, 4), [255, 0, 0, 128]);
+  assert.equal(pixel(out, 5)[3], 0, 'held (transparent) above the last stop');
+  // Exponential curves are sampled at their stops and blended linearly.
+  const exponential = relief(['interpolate', ['exponential', 2], ['elevation'], 0, '#000000', 1000, '#ffffff'], 500);
+  assert.deepEqual(pixel(exponential, 0), [128, 128, 128, 255]);
+  const step = relief(['step', ['elevation'], '#0000ff', 0, '#00ff00', 1000, '#ffffff'], -1, 0, 999, 1000);
+  assert.deepEqual([0, 1, 2, 3].map(i => pixel(step, i)), [[0, 0, 255, 255], [0, 255, 0, 255], [0, 255, 0, 255], [255, 255, 255, 255]]);
+  assert.deepEqual(pixel(relief('#336699', 10), 0), [51, 102, 153, 255], 'a constant colour');
+  assert.equal(pixel(vector.reliefDEM(dem(10), terrarium, { type: 'color-relief' }), 0)[3], 0, 'no colour draws nothing');
+});
+
+test('color-relief layers colour raster-dem tiles in style order', async () => {
+  FakeElement.images = [];
+  const style = {
+    version: 8,
+    sources: {
+      base: { type: 'vector', tiles: ['/{z}/{x}/{y}.mvt'] },
+      dem: { type: 'raster-dem', tiles: ['/dem/{z}/{x}/{y}.png'], encoding: 'terrarium', tileSize: 256, maxzoom: 4 }
+    },
+    layers: [
+      { id: 'land', type: 'fill', source: 'base', 'source-layer': 'building', paint: { 'fill-color': '#aa0000' } },
+      { id: 'relief', type: 'color-relief', source: 'dem', paint: { 'color-relief-color': ['interpolate', ['linear'], ['elevation'], 0, 'green', 3000, 'white'], 'color-relief-opacity': 0.7 } },
+      { id: 'roads', type: 'line', source: 'base', 'source-layer': 'transportation', paint: { 'line-color': '#00aa00' } }
+    ]
+  };
+  const { map, layer, context } = setup(style, roads, { zoom: 1, tileSize: 512 });
+  await wait(80);
+  assert.deepEqual(layer.getStyleReport().skippedLayers, []);
+  const draws = context.ops.filter(op => op.op === 'drawImage');
+  assert.ok(draws.length && draws.every(op => !op.src), 'coloured canvases, never the raw elevation image');
+  const order = context.ops.map(op => op.op === 'fill' ? op.fillStyle : op.op === 'stroke' ? op.strokeStyle : op.op === 'drawImage' ? 'relief' : null).filter(Boolean);
+  assert.ok(order.indexOf('#aa0000') < order.indexOf('relief') && order.indexOf('relief') < order.lastIndexOf('#00aa00'), order.join(' '));
+  assert.ok(draws.every(op => Math.abs(op.alpha - 0.7) < 1e-9), 'color-relief-opacity applies');
+  assert.throws(() => layer.addLayer({ id: 'wrong', type: 'color-relief', source: 'base', 'source-layer': 'water' }), /matching raster source/);
+  layer.destroy();
+  map.destroy();
+});
+
+test('raster-dem sources by TileJSON and in addLayer', async () => {
+  const style = { version: 8, sources: { base: { type: 'vector', tiles: ['/{z}/{x}/{y}.mvt'] } }, layers: [] };
+  const fetches = [];
+  const { map, layer } = setup(style, roads, { zoom: 1, tileSize: 512 }, {
+    fetch: url => {
+      fetches.push(url);
+      if (url === '/terrain.json') return Promise.resolve({ ok: true, json: () => Promise.resolve({ tiles: ['/terrain/{z}/{x}/{y}.webp'], maxzoom: 3, encoding: 'terrarium' }) });
+      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(arrayBuffer(roads)) });
+    }
+  });
+  FakeElement.images = [];
+  layer.addSource('terrain', { type: 'raster-dem', url: '/terrain.json' });
+  assert.throws(() => layer.addLayer({ id: 'wrong', type: 'raster', source: 'terrain' }), /matching raster source and layer type/);
+  layer.addLayer({ id: 'relief', type: 'hillshade', source: 'terrain' });
+  await wait(80);
+  assert.ok(fetches.includes('/terrain.json'));
+  // Without a tileSize, raster-dem tiles are 512px (MapLibre's default).
+  assert.ok(FakeElement.images.some(url => /^\/terrain\/1\/\d\/\d\.webp$/.test(url)), FakeElement.images.join(' '));
+  layer.destroy();
+  map.destroy();
+});
+
+test('heatmap layers colour kernel density from GeoJSON loaded by URL', async () => {
+  const points = { type: 'FeatureCollection', features: [0, 1, 2, 3, 4].map(i => ({ type: 'Feature', properties: { mag: i + 2 }, geometry: { type: 'Point', coordinates: [10 + i * 0.5, 48] } })) };
+  const style = {
+    version: 8,
+    sources: { base: { type: 'vector', tiles: ['/{z}/{x}/{y}.mvt'] }, quakes: { type: 'geojson', data: '/quakes.geojson' } },
+    layers: [
+      { id: 'roads', type: 'line', source: 'base', 'source-layer': 'transportation', paint: { 'line-color': '#00aa00' } },
+      { id: 'heat', type: 'heatmap', source: 'quakes', paint: { 'heatmap-weight': ['interpolate', ['linear'], ['get', 'mag'], 0, 0, 6, 1], 'heatmap-radius': 20 } }
+    ]
+  };
+  const fetched = [];
+  const { map, layer, context } = setup(style, roads, { zoom: 5, center: [11, 48], tileSize: 512 }, {
+    fetch: url => {
+      fetched.push(url);
+      if (url === '/quakes.geojson') return Promise.resolve({ ok: true, json: () => Promise.resolve(points) });
+      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(arrayBuffer(roads)) });
+    }
+  });
+  const events = [];
+  layer.on('sourcedata', event => events.push(event.source));
+  await wait(80);
+  assert.ok(fetched.includes('/quakes.geojson'));
+  assert.ok(events.includes('quakes'), 'sourcedata after the document arrives');
+  assert.equal(layer.getStyle().sources.quakes.data, '/quakes.geojson', 'getStyle keeps the URL');
+  assert.deepEqual(layer.getStyleReport().skippedLayers, []);
+  const order = context.ops.map(op => op.op === 'stroke' ? op.strokeStyle : op.op === 'drawImage' && !op.src ? 'heat' : null).filter(Boolean);
+  assert.ok(order.includes('heat') && order.indexOf('#00aa00') < order.lastIndexOf('heat'), 'the heatmap is drawn above the roads: ' + order.join(' '));
+  const vector = require('../lib/microMap.vector.js');
+  assert.deepEqual(vector.evaluateExpression(['to-rgba', 'lime']), [0, 255, 0, 1], 'CSS colour names, as in the default heatmap ramp');
+  assert.equal(layer.queryRenderedFeatures({ layers: ['heat'] }).length, 0, 'heatmaps are not hit-tested');
+  layer.destroy();
+  map.destroy();
 });

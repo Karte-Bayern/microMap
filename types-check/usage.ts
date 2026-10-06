@@ -12,3 +12,6 @@ map.on('load', () => map.getCenter().toArray());
 
 const named: typeof bundle.Map = bundle.Map;
 void named;
+const inBox: maplibre.MapGeoJSONFeature[] = map.queryRenderedFeatures([[0, 0], [100, 100]], { filter: ['==', ['get', 'class'], 'primary'] });
+const everything: number = map.queryRenderedFeatures({ layers: ['points'] }).length + inBox.length;
+void everything;
