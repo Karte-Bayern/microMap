@@ -155,6 +155,13 @@ is not required for these style layers.
 
 Heatmaps retain their order relative to ground layers in pitched views, so a
 road or circle placed above a heatmap remains visible above its density colours.
+Sparse heatmaps read and colour only the rectangle touched by visible kernels.
+Ramps with a visible colour at zero density still colour the whole viewport.
+Kernel sprites are created only for visible points and retained in a 64-entry
+LRU cache. `node bench/style-heatmap-bench.cjs [vector-module-path]` compares
+readback and colour-conversion work with a synthetic Canvas; it does not measure
+browser rasterisation or compositing.
+
 The vector layer's `getRenderStats()` includes a monotonic `frames` count and
 the last frame's `renderMs` and `demMs`. In pitched mode, `groundMs`, `heatMs`
 and `labelMs` distinguish ground, density and label work; `maxCellMs` measures
