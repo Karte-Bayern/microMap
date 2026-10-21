@@ -123,6 +123,24 @@ test('MapLibre facade reports the package version', () => {
   assert.equal(maplibre.getVersion(), packageVersion);
 });
 
+test('quality DPR caps agree with the reported ratio and canvas allocation', async () => {
+  const before = global.devicePixelRatio;
+  try {
+    global.devicePixelRatio = 3;
+    for (const ratio of [1, 1.5, 2]) {
+      const { map, container } = createMap({ pixelRatio: ratio });
+      try {
+        const deadline = Date.now() + 2000;
+        while (!map.loaded() && Date.now() < deadline) await wait(5);
+        assert.ok(map.loaded());
+        assert.equal(map.getPixelRatio(), ratio);
+        assert.equal(map.getCanvas().width, Math.round(container.clientWidth * ratio));
+        assert.equal(map.getCanvas().height, Math.round(container.clientHeight * ratio));
+      } finally { map.remove(); }
+    }
+  } finally { global.devicePixelRatio = before; }
+});
+
 const wait = (milliseconds = 30) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 // A tiny MVT tile with one road; enough to exercise loading and queries.
@@ -190,7 +208,8 @@ test('new Map() loads a whole MapLibre style and fires its lifecycle events in o
   const { map, requests } = createMap();
   const events = [];
   for (const type of ['style.load', 'styledata', 'load', 'idle', 'error']) map.on(type, event => events.push(type + (event.error ? ':' + event.error.message : '')));
-  await wait(150);
+  const deadline = Date.now() + 2000;
+  while (!events.includes('idle') && Date.now() < deadline) await wait(10);
   assert.deepEqual(events.filter(type => type !== 'styledata').slice(0, 3), ['style.load', 'load', 'idle']);
   assert.equal(map.isStyleLoaded(), true);
   assert.ok(map.loaded());
@@ -215,6 +234,31 @@ test('MapLibre zoom levels: a 512px world, and project/unproject with LngLat obj
   assert.ok(Math.abs(lngLat.lng) < 1e-9 && Math.abs(lngLat.lat) < 1e-9);
   assert.ok(map.getBounds() instanceof maplibre.LngLatBounds);
   map.remove();
+});
+
+test('URL GeoJSON updates resume idle after their data arrives', async () => {
+  let resolveData;
+  const pending = new Promise(resolve => { resolveData = resolve; });
+  const { map } = createMap({
+    style: { version: 8, sources: { points: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } } },
+      layers: [{ id: 'points', type: 'circle', source: 'points' }] },
+    fetch: () => pending
+  });
+  try {
+    await map.once('idle');
+    let idles = 0;
+    map.on('idle', () => idles++);
+    map.getSource('points').setData('/points.geojson');
+    await wait(150);
+    assert.equal(map.areTilesLoaded(), false);
+    assert.equal(map.loaded(), false);
+    assert.equal(idles, 0);
+    resolveData({ ok: true, json: async () => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [0, 0] } }) });
+    const deadline = Date.now() + 2000;
+    while (!idles && Date.now() < deadline) await wait(10);
+    assert.equal(idles, 1, 'a source-only update starts a new idle cycle');
+    assert.equal(map.loaded(), true);
+  } finally { map.remove(); }
 });
 
 test('sources, layers, events and controls work after load as in MapLibre', async () => {

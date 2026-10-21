@@ -235,7 +235,8 @@ const bundles = [
     entry: new URL('./bundle/browser.cjs', import.meta.url),
     outputUrl: new URL('../dist/micromap.cjs', import.meta.url),
     format: 'cjs',
-    budget: 122880
+    // The same general-purpose modules as IIFE/ESM, with the same budget.
+    budget: 131072
   }
 ];
 if (!checkOnly) await mkdir(new URL('../dist/', import.meta.url), { recursive: true });

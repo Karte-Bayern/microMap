@@ -18,6 +18,13 @@ declare namespace maplibre {
     url?: string;
     tiles?: string[];
     tileSize?: number;
+    /** RGB elevation encoding for raster-dem sources (default mapbox). */
+    encoding?: 'mapbox' | 'terrarium' | 'custom';
+    /** Custom elevation in metres: R * redFactor + G * greenFactor + B * blueFactor + baseShift. */
+    redFactor?: number;
+    greenFactor?: number;
+    blueFactor?: number;
+    baseShift?: number;
     minzoom?: number;
     maxzoom?: number;
     bounds?: [number, number, number, number];
@@ -119,7 +126,7 @@ declare namespace maplibre {
     attributionControl?: boolean | { compact?: boolean; customAttribution?: string | string[] };
     hash?: boolean | string;
     transformRequest?: RequestTransformFunction;
-    /** Maximum device pixel ratio for rendering (default 2). */
+    /** Canvas DPR cap (1–4, default 2), also limited by the device pixel ratio. */
     pixelRatio?: number;
     /** URL of a standalone microMap.vector.js or micromap.min.js for worker decoding. */
     workerUrl?: string;

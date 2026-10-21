@@ -9,7 +9,7 @@ A lightweight, dependency-free JavaScript map library with a **MapLibre-shaped
 API for a documented subset of MapLibre GL JS**. It renders MapLibre style
 documents (vector, GeoJSON and raster sources, sprites, expressions) with a
 real perspective camera, 3D buildings, markers, popups and controls — in about
-115 KB (min+gzip) for everything, or from 16 KB for a raster-only map. MIT
+126 KB (min+gzip) for the general-purpose bundle, or from 16 KB for a raster-only map. MIT
 licensed.
 
 ```js
@@ -43,7 +43,7 @@ map.on('load', () => {
   depth buffer (Canvas 2D fallback). Raster, vector, GeoJSON, markers and hit
   testing share one camera.
 - **Small and modular.** Import only what you use: the raster core is 16 KB,
-  the style renderer 62 KB, UI 14 KB. No runtime dependencies, no build step
+  the style renderer 65 KB, UI 14 KB. No runtime dependencies, no build step
   required, plain `<script>` tags work.
 - **Works without a GPU.** Map tiles are painted with Canvas 2D and composited
   by the browser; WebGL is only an accelerator for 3D buildings.
@@ -52,7 +52,7 @@ map.on('load', () => {
 
 | | microMap 0.3 | MapLibre GL JS 6 |
 | --- | --- | --- |
-| Download (min+gzip, everything) | ~115 KB | ~156 KB (main + worker) |
+| Download (min+gzip, general-purpose bundle) | ~126 KB | ~156 KB (main + worker) |
 | Raster-only map | ~16 KB | ~156 KB |
 | Runtime dependencies | none | several |
 | Rendering | Canvas 2D tiles, CSS 3D compositing, WebGL for buildings | WebGL / WebGPU |
@@ -98,6 +98,7 @@ attribution; the map shows the attribution of the sources a style uses.
 - [Migrating from MapLibre GL JS](docs/maplibre.md) — compatibility matrix
 - [Core API](docs/reference.md) — camera, raster tiles, events, limits
 - [Optional modules](docs/modules.md) — vector styles, GeoJSON, UI, PMTiles…
+- [Elevation and heatmap layers](docs/modules.md#elevation-and-heatmap-style-layers) — DEM encodings and style examples
 - [Demos](https://github.com/Karte-Bayern/microMap/tree/main/demo)
 
 ## Development
@@ -117,6 +118,17 @@ and are not part of the source repository. After editing `lib/`, run
 `npm run build`. For rendering or interaction changes also open the relevant
 `test/` or `demo/` page in a browser: automated tests use simulated DOM and
 Canvas APIs and verify behaviour, not pixels.
+Test files run serially so their simulated animation timers do not compete
+across processes on busy machines.
+
+With the local server running, open `test/terrain-browser.html` for pixel checks
+of hillshade, colour relief and heatmaps, including rotation, pitch, style
+updates and missing elevation data. Add `?min=1` to check the minified scripts.
+`test/terrain-real-browser.html` combines real JAXA elevation tiles around
+Innsbruck with OpenFreeMap Liberty/Bright and a deterministic 3,000-point
+heatmap. It includes pitch/rotation controls, source error reporting and a
+rotation benchmark. Run benchmarks in a visible browser with other CPU-heavy
+work paused; public tile services and cold caches affect initial load times.
 
 microMap.js is developed in the [Karte.Bayern](https://karte.bayern/) project
 ([GitHub](https://github.com/Karte-Bayern)) and maintained by

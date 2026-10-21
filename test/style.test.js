@@ -229,7 +229,7 @@ test('standalone base style reports all supported layers without ignored propert
   map.destroy();
 });
 
-test('evaluates zoom and data expressions per feature group with MapLibre zoom levels', async () => {
+test('evaluates zoom and data expressions per feature group with MapLibre zoom levels', async t => {
   const style = {
     version: 8,
     sources: { base: { type: 'vector', tiles: ['/{z}/{x}/{y}.mvt'] } },
@@ -247,7 +247,10 @@ test('evaluates zoom and data expressions per feature group with MapLibre zoom l
   };
   // With a 256px core camera, core zoom 3 is MapLibre zoom 2.
   const { map, layer, context, requested } = setup(style, roads, { zoom: 3 });
-  await wait();
+  t.after(() => { layer.destroy(); map.destroy(); });
+  const deadline = Date.now() + 2000;
+  while ((!layer.areTilesLoaded() || !context.ops.some(op => op.op === 'stroke')) && Date.now() < deadline) await wait(5);
+  assert.ok(layer.areTilesLoaded(), 'the expression frame finished loading');
   assert.ok(requested.every(url => url.startsWith('/2/')), 'MapLibre styles pick floor(512px zoom) tiles: ' + requested.join(' '));
   const background = context.ops.find(op => op.op === 'fillRect');
   assert.equal(background.fillStyle, 'rgba(128,128,128,1)');
@@ -263,8 +266,6 @@ test('evaluates zoom and data expressions per feature group with MapLibre zoom l
   assert.deepEqual(primary[0].dash.map(value => +(value * scale).toFixed(6)), [10, 5], 'dashes scale with the line width');
   // Two residential roads share a group: one merged path per tile.
   assert.equal(other.length, requested.length);
-  layer.destroy();
-  map.destroy();
 });
 
 test('reuses cached group paths across frames and rebuilds only changed layers', async () => {
@@ -273,32 +274,37 @@ test('reuses cached group paths across frames and rebuilds only changed layers',
     { id: 'buildings', type: 'fill', sourceLayer: 'building', paint: { color: '#abcdef' } }
   ];
   const { map, layer, context, frame } = setup(style, roads, { zoom: 0 });
-  await wait();
+  async function renderedFrame() {
+    const deadline = Date.now() + 2000;
+    while ((!layer.areTilesLoaded() || !context.ops.some(op => op.op === 'stroke')) && Date.now() < deadline) await wait(5);
+    assert.ok(layer.areTilesLoaded() && context.ops.some(op => op.op === 'stroke'), 'the requested frame finished painting');
+  }
+  await renderedFrame();
   const firstRoad = context.ops.find(op => op.op === 'stroke').path;
   const firstBuilding = context.ops.find(op => op.op === 'fill').path;
   assert.ok(firstRoad instanceof RecordingPath);
   frame();
   map.panBy([3, 2]);
-  await wait();
+  await renderedFrame();
   assert.equal(context.ops.find(op => op.op === 'stroke').path, firstRoad, 'a pan frame reuses the Path2D');
   frame();
   layer.setPaintProperty('roads', 'color', '#654321');
-  await wait();
+  await renderedFrame();
   const stroke = context.ops.find(op => op.op === 'stroke');
   assert.equal(stroke.strokeStyle, '#654321');
   assert.notEqual(stroke.path, firstRoad, 'a paint change rebuilds that layer');
   assert.equal(context.ops.find(op => op.op === 'fill').path, firstBuilding, 'other layers keep their paths');
   frame();
   layer.setLayoutProperty('buildings', 'visibility', 'none');
-  await wait();
+  await renderedFrame();
   assert.ok(!context.ops.some(op => op.op === 'fill'));
   frame();
   layer.setLayoutProperty('buildings', 'visibility', 'visible');
-  await wait();
+  await renderedFrame();
   assert.equal(context.ops.find(op => op.op === 'fill').path, firstBuilding, 'visibility keeps cached paths');
   frame();
   layer.setFilter('roads', ['==', 'class', 'primary']);
-  await wait();
+  await renderedFrame();
   const filtered = context.ops.find(op => op.op === 'stroke').path;
   assert.equal(filtered.ops.filter(op => op[0] === 'M').length, 1, 'setFilter rebuilds with the new filter');
   assert.deepEqual(layer.getFilter('roads'), ['==', 'class', 'primary']);
@@ -320,11 +326,15 @@ test('converts legacy filters including $type, in, !in, has and !has', async () 
     const { map, layer, context } = setup([{ id: 'dots', type: 'circle', sourceLayer: 'mixed', filter, paint: { color: '#111', radius: 2 } },
       { id: 'lines', type: 'line', sourceLayer: 'mixed', filter, paint: { color: '#222' } },
       { id: 'areas', type: 'fill', sourceLayer: 'mixed', filter, paint: { color: '#333' } }], data, { zoom: 0 });
-    await wait();
-    const colors = new Set(context.ops.filter(op => op.op === 'fill' || op.op === 'stroke').map(op => op.fillStyle && op.op === 'fill' ? op.fillStyle : op.strokeStyle));
-    layer.destroy();
-    map.destroy();
-    return colors;
+    try {
+      const deadline = Date.now() + 2000;
+      while (!layer.areTilesLoaded() && Date.now() < deadline) await wait(5);
+      assert.ok(layer.areTilesLoaded(), 'the filtered frame finished loading');
+      return new Set(context.ops.filter(op => op.op === 'fill' || op.op === 'stroke').map(op => op.fillStyle && op.op === 'fill' ? op.fillStyle : op.strokeStyle));
+    } finally {
+      layer.destroy();
+      map.destroy();
+    }
   };
   assert.deepEqual([...await run(['==', '$type', 'Point'])], ['#111']);
   assert.deepEqual([...await run(['in', 'kind', 'b', 'c'])].sort(), ['#222', '#333']);
@@ -1020,7 +1030,7 @@ test('raster-dem sources by TileJSON and in addLayer', async () => {
   map.destroy();
 });
 
-test('heatmap layers colour kernel density from GeoJSON loaded by URL', async () => {
+test('heatmap layers colour kernel density from GeoJSON loaded by URL', async t => {
   const points = { type: 'FeatureCollection', features: [0, 1, 2, 3, 4].map(i => ({ type: 'Feature', properties: { mag: i + 2 }, geometry: { type: 'Point', coordinates: [10 + i * 0.5, 48] } })) };
   const style = {
     version: 8,
@@ -1039,8 +1049,14 @@ test('heatmap layers colour kernel density from GeoJSON loaded by URL', async ()
     }
   });
   const events = [];
+  t.after(() => { layer.destroy(); map.destroy(); });
   layer.on('sourcedata', event => events.push(event.source));
-  await wait(80);
+  async function settled() {
+    const deadline = Date.now() + 2000;
+    while (!layer.areTilesLoaded() && Date.now() < deadline) await wait(5);
+    assert.ok(layer.areTilesLoaded(), 'heatmap sources and render frame settled');
+  }
+  await settled();
   assert.ok(fetched.includes('/quakes.geojson'));
   assert.ok(events.includes('quakes'), 'sourcedata after the document arrives');
   assert.equal(layer.getStyle().sources.quakes.data, '/quakes.geojson', 'getStyle keeps the URL');
@@ -1050,6 +1066,70 @@ test('heatmap layers colour kernel density from GeoJSON loaded by URL', async ()
   const vector = require('../lib/microMap.vector.js');
   assert.deepEqual(vector.evaluateExpression(['to-rgba', 'lime']), [0, 255, 0, 1], 'CSS colour names, as in the default heatmap ramp');
   assert.equal(layer.queryRenderedFeatures({ layers: ['heat'] }).length, 0, 'heatmaps are not hit-tested');
-  layer.destroy();
-  map.destroy();
+  context.ops.length = 0;
+  layer.setPaintProperty('heat', 'heatmap-radius', 0);
+  await settled();
+  assert.ok(context.ops.some(op => op.op === 'stroke'), 'the updated frame still draws the roads');
+  assert.ok(!context.ops.some(op => op.op === 'drawImage'), 'zero radius draws no heatmap kernels');
+});
+
+test('heatmap caches stable frames and refreshes camera, paint, data and feature state', async t => {
+  let reads = 0;
+  const originalRead = RecordingContext.prototype.getImageData;
+  RecordingContext.prototype.getImageData = function (...args) { reads++; return originalRead.apply(this, args); };
+  const points = { type: 'FeatureCollection', features: [
+    { type: 'Feature', id: 42, properties: { weight: 1 }, geometry: { type: 'Point', coordinates: [11, 48] } },
+    { type: 'Feature', id: 43, properties: { weight: 3 }, geometry: { type: 'Point', coordinates: [11.1, 48] } }
+  ] };
+  const style = { version: 8, sources: { points: { type: 'geojson', data: points } }, layers: [
+    { id: 'heat', type: 'heatmap', source: 'points', paint: {
+      'heatmap-radius': 20,
+      'heatmap-weight': ['coalesce', ['feature-state', 'weight'], ['get', 'weight']]
+    } }
+  ] };
+  const { map, layer, context } = setup(style, roads, { zoom: 5, center: [11, 48], tileSize: 512 }, { tiles: false });
+  t.after(() => { layer.destroy(); map.destroy(); RecordingContext.prototype.getImageData = originalRead; });
+  async function settled() {
+    const deadline = Date.now() + 5000;
+    while (!layer.areTilesLoaded() && Date.now() < deadline) await wait(5);
+    assert.ok(layer.areTilesLoaded(), 'heatmap frame settled');
+  }
+  async function changed(action, reason) {
+    const before = reads;
+    action();
+    await settled();
+    assert.ok(reads > before, reason);
+  }
+  await settled();
+  assert.ok(reads > 0, 'initial heatmap density was read');
+  const initialReads = reads;
+  context.ops.length = 0;
+  for (let frame = 0; frame < 3; frame++) { layer.redraw(); await settled(); }
+  assert.equal(reads, initialReads, 'identical redraws reuse the coloured density frame');
+  assert.equal(context.ops.filter(op => op.op === 'drawImage').length, 3, 'each cached frame is still composited');
+  await changed(() => map.setCenter([11.02, 48]), 'panning refreshes density');
+  await changed(() => map.setBearing(15), 'rotation refreshes density');
+  await changed(() => map.setPitch(30), 'pitch refreshes density');
+  await changed(() => map.setZoom(5.1), 'zoom refreshes density');
+  await changed(() => { map.getContainer().clientWidth = 544; map.resize(); }, 'viewport resize refreshes density');
+  await changed(() => layer.setPaintProperty('heat', 'heatmap-radius', 30), 'paint updates refresh density');
+  await changed(() => layer.setFeatureState({ source: 'points', id: 43 }, { weight: 6 }), 'feature state in a separate group refreshes density');
+  await changed(() => {
+    const next = JSON.parse(JSON.stringify(points));
+    next.features[0].geometry.coordinates = [11.2, 48.1];
+    layer.getSource('points').setData(next);
+  }, 'moving a marker with setData refreshes density');
+  const lastReads = reads;
+  layer.redraw();
+  await settled();
+  assert.equal(reads, lastReads, 'the changed source also settles into a cached frame');
+  context.ops.length = 0;
+  layer.getSource('points').setData({ type: 'FeatureCollection', features: [] });
+  await settled();
+  layer.redraw();
+  await settled();
+  assert.equal(reads, lastReads, 'empty density frames need no readback');
+  assert.ok(!context.ops.some(op => op.op === 'drawImage'), 'removing all markers clears the cached heatmap');
+  await changed(() => layer.setStyle(style), 'replacing the style drops cached canvases');
+  assert.doesNotThrow(() => JSON.stringify(layer.getStyle()), 'getStyle exposes no canvas/cache objects');
 });

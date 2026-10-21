@@ -92,7 +92,9 @@ test('camera adapter supports bounded jump/ease/pan operations', async () => {
   assert.throws(() => camera.jumpTo({ center: [0, 0], padding: 4 }), /padding is not supported/);
 
   camera.easeTo({ center: [170, 4], zoom: 3, bearing: 350, pitch: 4, duration: 18, easing: value => value });
-  await wait(50);
+  const deadline = Date.now() + 2000;
+  while (camera.isEasing() && Date.now() < deadline) await wait(5);
+  assert.equal(camera.isEasing(), false, 'the animation reaches its final frame');
   assertCenter(map.getCenter(), [170, 4]);
   assert.equal(map.getZoom(), 3);
   assert.equal(map.getBearing(), 350);

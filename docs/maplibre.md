@@ -66,12 +66,15 @@ CSS with `micromap-` class names.
 | Layer types | `background`, `fill`, `line`, `circle`, `symbol`, `fill-extrusion`, `raster`, `hillshade` and `color-relief` (`raster-dem`, Mapbox/Terrarium/custom encodings), `heatmap` |
 | Not rendered (reported in `getStyleReport().skippedLayers`) | `image`/`video`/`canvas` sources |
 | Expressions | data, zoom and feature-state expressions: `get`, `has`, `id`, `geometry-type`, `properties`, `let`/`var`, `case`, `match`, `coalesce`, `step`, `interpolate` (linear, exponential; `-hcl`/`-lab` interpolate in RGB), comparisons, `all`/`any`/`!`/`in`, type assertions and conversions, `to-rgba`, `rgb`/`rgba`, `heatmap-density`, `elevation`, string, array (`at`, `slice`, `index-of`) and math operators, `format` (text only), `number-format`, legacy filters and functions |
-| Approximated | per-section `format` fonts and colours, `text-letter-spacing`, `text-halo-blur`, `symbol-spacing`, pitch/rotation alignment, variable anchors, sort keys, `icon-text-fit`, raster colour adjustments |
+| Approximated | per-section `format` fonts and colours, `text-letter-spacing`, `text-halo-blur`, `symbol-spacing`, pitch/rotation alignment, variable anchors, sort keys, `icon-text-fit`, raster colour adjustments, hillshade methods other than `standard` |
 | Text | browser fonts chosen from `text-font`; `glyphs` are not downloaded. Line labels follow their line's curves glyph by glyph (respecting `text-max-angle`); scripts that need shaping (Arabic, Hebrew, Indic, Thai) stay straight |
 | Terrain, globe, light | `setTerrain`, `setProjection({ type: 'globe' })` and `setLight` are accepted and ignored with a console warning |
 
 `map._vector.getStyleReport()` lists every skipped layer and every ignored or
 approximated property of the loaded style, so differences are never silent.
+See [elevation and heatmap examples](modules.md#elevation-and-heatmap-style-layers)
+for DEM encodings, colour ramps and point density layers. Heatmap layers do not
+participate in `queryRenderedFeatures()`.
 
 ## Rendering differences
 

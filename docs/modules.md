@@ -59,6 +59,116 @@ The Karte.Bayern-specific style is exported as
 `@karte.bayern/micromap/styles/karte-bayern-blue`. Its factory accepts
 `{ theme: 'warm' | 'light' | 'dark' | 'night' | 'contrast' }`.
 
+For navigation interfaces such as Karte.Bayern and offline viewers such as
+osmmini, keep frequently updated data separate from the basemap:
+
+- With `compose`, `geojson: true` creates a separate overlay for live GPS and
+  routes. Updating it does not repaint the vector basemap.
+- In a Style v8 map, heatmap-, symbol- and extrusion-only GeoJSON updates keep
+  pitched ground textures. Fully transparent query layers also keep them;
+  feature-dependent opacity remains tracked.
+- Repeating the same paint, layout, filter or zoom-range values does not
+  recompile or redraw a layer. Fresh arrays with the same expression contents
+  count as unchanged. Real changes still invalidate the affected rendering.
+- `querySourceFeatures()` applies GeoJSON filters and returns clusters at the
+  current 512px style zoom, even when the basemap is overzoomed. DOM search
+  markers can use these results with `getClusterLeaves()` and
+  `getClusterExpansionZoom()` instead of creating one marker per raw point.
+- The MapLibre-shaped `Map` accepts `pixelRatio: 1`, `1.5` or `2` as a DPR cap
+  for lower fill rate on mobile devices. `getPixelRatio()` reports the effective
+  ratio, capped by the device ratio.
+
+`test/consumer-browser.html` checks these patterns with independent synthetic
+data and real Canvas pixels; `?min=1` checks the generated scripts. Applications
+that vendor microMap must explicitly update their module or standalone assets
+after building, together with any pinned revisions and asset checksums. Building
+this library does not update a consumer's installed copy.
+
+## Elevation and heatmap style layers
+
+The vector renderer and the MapLibre-compatible `Map` support `hillshade`,
+`color-relief` and `heatmap` style layers. They are included in the general-purpose
+bundle. Add sources and layers after the map's `load` event:
+
+```js
+map.on('load', () => {
+  map.addSource('elevation', {
+    type: 'raster-dem',
+    tiles: ['/dem/{z}/{x}/{y}.png'],
+    encoding: 'terrarium',
+    tileSize: 256,
+    maxzoom: 14
+  });
+  map.addLayer({
+    id: 'elevation-colours', type: 'color-relief', source: 'elevation',
+    paint: {
+      'color-relief-color': ['interpolate', ['linear'], ['elevation'],
+        0, '#406d50', 1000, '#b9b276', 3000, '#ffffff'],
+      'color-relief-opacity': 0.8
+    }
+  });
+  map.addLayer({
+    id: 'shading', type: 'hillshade', source: 'elevation',
+    paint: { 'hillshade-exaggeration': 0.5, 'hillshade-illumination-direction': 315 }
+  });
+});
+```
+
+Use your provider's DEM URL, encoding, tile size and maximum zoom. A source may
+also use `url` to load TileJSON. DEM encoding defaults to `mapbox`, tile size to
+512. `terrarium` is supported; `custom` uses `redFactor`, `greenFactor`,
+`blueFactor` and `baseShift` to decode metres as
+`R * redFactor + G * greenFactor + B * blueFactor + baseShift`.
+The custom channel factors default to 1 and the shift to 0.
+Cross-origin DEM images need CORS permission because their pixels are read.
+
+`color-relief-color` must supply a colour or a ramp over `['elevation']` in metres;
+without it the layer is transparent. Interpolation ramps blend their sampled
+stop colours linearly; `step` ramps keep hard boundaries. Hillshade uses the
+`standard` method; other `hillshade-method` values are reported as approximated.
+Both layers colour the map surface and do not create 3D terrain.
+`hillshade-illumination-anchor: 'map'` fixes the light to the compass;
+the default `'viewport'` keeps it fixed to the screen as the map rotates.
+
+Heatmaps use Point or MultiPoint features from GeoJSON or a vector source. For
+example, inside the same `load` handler:
+
+```js
+map.addSource('observations', { type: 'geojson', data: '/observations.geojson' });
+map.addLayer({
+  id: 'density', type: 'heatmap', source: 'observations',
+  paint: {
+    'heatmap-radius': 24,
+    'heatmap-weight': ['coalesce', ['get', 'weight'], 1],
+    'heatmap-intensity': 1,
+    'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
+      0, 'rgba(0, 80, 255, 0)', 0.5, '#00d4b0', 1, '#ff5b32'],
+    'heatmap-opacity': 0.8
+  }
+});
+```
+
+For vector tiles also set the layer's `source-layer`. Heatmaps are excluded from
+`queryRenderedFeatures()`; use a separate circle layer if points need interaction.
+The optional `heatmap` module is a separate overlay API with time filtering and
+is not required for these style layers.
+
+Heatmaps retain their order relative to ground layers in pitched views, so a
+road or circle placed above a heatmap remains visible above its density colours.
+The vector layer's `getRenderStats()` includes a monotonic `frames` count and
+the last frame's `renderMs` and `demMs`. In pitched mode, `groundMs`, `heatMs`
+and `labelMs` distinguish ground, density and label work; `maxCellMs` measures
+the slowest ground-cell painting step in that frame. DEM work is included in
+ground time, so these timings are not additive. They exclude browser compositing.
+Hillshade reuses direction-independent calculations in an LRU cache bounded to
+24 MiB and 32 entries. Pitched ground painting can continue between style layers
+and groups on later frames; completed cells remain visible until their replacement
+is ready. Individual raster or geometry operations can still exceed the budget.
+Use `test/terrain-real-browser.html` for a real-data check with JAXA elevations,
+OpenFreeMap styles and repeatable full or quick rotation benchmarks. The page
+reports phase distributions and browser long tasks when supported; compare the
+same run type, style, viewport and cache conditions when evaluating a change.
+
 ## GeoJSON
 
 ```js

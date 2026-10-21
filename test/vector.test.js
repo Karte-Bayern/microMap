@@ -156,6 +156,14 @@ function wait(milliseconds = 20) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+async function waitForRender(layer) {
+  // Decoding and budgeted painting may span several frames on a busy host.
+  // areTilesLoaded also waits for scheduled draws and incomplete tilt cells.
+  const deadline = Date.now() + 2000;
+  while (!layer.areTilesLoaded() && Date.now() < deadline) await wait(5);
+  assert.ok(layer.areTilesLoaded(), 'visible tiles and their render finished: ' + JSON.stringify(layer.getRenderStats()));
+}
+
 function concat(parts) {
   const length = parts.reduce((sum, part) => sum + part.length, 0);
   const result = new Uint8Array(length);
@@ -457,25 +465,27 @@ test('uses the core bearing matrix for flat views and its perspective camera whe
   map.destroy();
 });
 
-test('uses the core camera state without inferring scale through project()', async () => {
+test('uses the core camera state without inferring scale through project()', async t => {
   for (const pitch of [0, 15]) {
     const { container, map } = createMap({ zoom: 2, bearing: 20, pitch });
+    t.after(() => map.destroy());
     map.project = () => { throw new Error('vector renderer should use getCameraState'); };
     const layer = microMapVector(map, {
       tiles: '/vectors/{z}/{x}/{y}.mvt',
       tileBuffer: 0,
       fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(fixture())) })
     });
-    await wait();
+    await waitForRender(layer);
     const painted = pitch ? tiltedView(container).operations : layer.getCanvas().getContext('2d').operations;
     assert.ok(painted.some(operation => operation[0] === 'lineTo'), 'pitch ' + pitch);
     map.destroy();
   }
 });
 
-test('the perspective cover paints near cells finer than far ones and reuses painted cells', async () => {
+test('the perspective cover paints near cells finer than far ones and reuses painted cells', async t => {
   const urls = [];
   const { container, map } = createMap({ center: [11.5, 48.1], zoom: 12, pitch: 70 });
+  t.after(() => map.destroy());
   const layer = microMapVector(map, {
     tiles: '/vectors/{z}/{x}/{y}.mvt',
     maxZoom: 14,
@@ -484,7 +494,7 @@ test('the perspective cover paints near cells finer than far ones and reuses pai
       return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(fixture())) });
     }
   });
-  await wait(40);
+  await waitForRender(layer);
   const levels = new Set(urls.map(url => +url.split('/')[2]));
   assert.ok(levels.size >= 2, 'several levels of detail: ' + [...levels]);
   assert.ok(Math.max(...levels) >= 12 && Math.min(...levels) < 12);
@@ -492,10 +502,9 @@ test('the perspective cover paints near cells finer than far ones and reuses pai
   assert.ok(view.cells.length > 4);
   const painted = view.operations.length;
   map.setBearing(1);
-  await wait(30);
+  await waitForRender(layer);
   assert.equal(tiltedView(container).operations.length, painted, 'a small rotation repaints no cell');
   assert.ok(layer.areTilesLoaded());
-  map.destroy();
 });
 
 test('queries visible MVT features in Canvas paint order with MapLibre-shaped copies', async () => {
@@ -668,8 +677,11 @@ async function drawBuildings(features, style, camera, keys = [], values = [], ve
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) }),
     ...vectorOptions
   });
-  await wait(35);
-  const operations = layer.getCanvas().getContext('2d').operations.slice();
+  await waitForRender(layer);
+  // Tile arrival and budgeted painting may have produced partial frames.
+  // Roof order and wall counts describe the final frame, not their history.
+  const recorded = layer.getCanvas().getContext('2d').operations;
+  const operations = recorded.slice(recorded.findLastIndex(operation => operation[0] === 'clearRect'));
   return { map, layer, operations, fills: operations.filter(operation => operation[0] === 'fill') };
 }
 
@@ -1435,7 +1447,7 @@ test.after(() => {
   }
 });
 
-test('point labels stay upright under bearing while line labels follow their line', async () => {
+test('point labels stay upright under bearing while line labels follow their line', async t => {
   const place = taggedFeature(1, [9, 4096, 4096], [0, 0]);
   const road = taggedFeature(2, [9, 0, 1024, 10, 8190, 0], [0, 1]);
   const data = concat([
@@ -1443,6 +1455,7 @@ test('point labels stay upright under bearing while line labels follow their lin
     bytesField(3, featureLayer('road', [road], ['name'], [valueString('Dingolfing'), valueString('Hauptstraße')]))
   ]);
   const { container, map } = createMap({ center: [0, 0], zoom: 3, bearing: 30 });
+  t.after(() => map.destroy());
   container.clientWidth = 400;
   container.clientHeight = 400;
   map.resize();
@@ -1455,7 +1468,7 @@ test('point labels stay upright under bearing while line labels follow their lin
     ],
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) })
   });
-  await wait(35);
+  await waitForRender(layer);
   const operations = layer.getCanvas().getContext('2d').operations;
   const rotationBefore = text => {
     const index = operations.findIndex(operation => operation[0] === 'fillText' && operation[1] === text);
@@ -1469,7 +1482,6 @@ test('point labels stay upright under bearing while line labels follow their lin
   assert.ok(roadRotation && Math.abs(roadRotation[1] + Math.PI / 6) < 1e-6, 'a horizontal road label turns with the map plane (-30° for bearing 30)');
   const glyphs = operations.filter(operation => operation[0] === 'fillText').map(operation => operation[1]).join('');
   assert.ok(glyphs.includes('Hauptstraße'), glyphs);
-  map.destroy();
 });
 
 test('line labels bend with their line, respect text-max-angle and keep shaped scripts whole', async () => {
@@ -1886,7 +1898,7 @@ async function cachedBuildings(extra = {}) {
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(asArrayBuffer(data)) }),
     ...extra
   });
-  await wait(35);
+  await waitForRender(layer);
   return { ...observed, map, layer };
 }
 
@@ -1898,13 +1910,15 @@ test('2.5D cache avoids per-building work on redraw/pan and ignores unrelated pr
     assert.ok(calls > 0 && fills > 0);
     scene.layer.redraw();
     scene.map.panBy([2, 0]);
-    await wait(25);
+    await waitForRender(scene.layer);
     assert.equal(scene.prismCalls.length, calls, 'cache hits must not reconstruct building pieces');
     assert.equal(scene.fills(), fills, 'cached image is reused');
     let loaded = 0;
     scene.layer.on('tileload', event => { if (event.preload) loaded++; });
     scene.layer.setPreload({ around: 1, zoom: [], maxTiles: 4, delay: 0 });
-    await wait(40);
+    const deadline = Date.now() + 2000;
+    while ((!loaded || !scene.idle.size) && Date.now() < deadline) await wait(5);
+    await waitForRender(scene.layer);
     assert.ok(loaded > 0);
     assert.equal(scene.prismCalls.length, calls, 'preloads do not invalidate the visible cache');
     assert.equal(scene.fills(), fills);
@@ -1913,11 +1927,11 @@ test('2.5D cache avoids per-building work on redraw/pan and ignores unrelated pr
     assert.ok(scene.prismCalls.length > calls);
     assert.equal(scene.fills(), fills, 'preparation does not draw offscreen tiles');
     scene.layer.setPaintProperties('buildings', { 'fill-extrusion-height': 40, 'fill-extrusion-color': '#ff0000' });
-    await wait(30);
+    await waitForRender(scene.layer);
     assert.ok(scene.fills() > fills, 'paint changes invalidate the image');
     const updated = scene.fills();
     scene.map.setPitch(60);
-    await wait(25);
+    await waitForRender(scene.layer);
     assert.ok(scene.fills() > updated, 'large camera changes rerender the geometry');
   } finally { scene.map.destroy(); }
   assert.equal(scene.idle.size, 0, 'destroy cancels preparation');

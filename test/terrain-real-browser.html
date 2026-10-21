@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>microMap · real terrain browser check</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #edf1f4; color: #192b38; font: 14px/1.45 system-ui, sans-serif; }
+  main { max-width: 1280px; margin: auto; padding: 18px; }
+  h1 { font-size: 23px; margin: 0 0 4px; }
+  p { margin: 5px 0 12px; }
+  a { color: #205b93; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+  button, select { font: inherit; padding: 7px 11px; border: 1px solid #b8c8d4; border-radius: 5px; background: white; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled, select:disabled { opacity: .55; cursor: wait; }
+  #map { width: 100%; height: 500px; position: relative; background: #dce5eb; border: 1px solid #b8c8d4; }
+  #status, #results, #errors { margin: 10px 0; padding: 10px; background: white; border-radius: 5px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+  #errors { color: #a41d27; }
+  #errors:empty { display: none; }
+  .note { font-size: 12px; color: #526370; }
+  @media (max-width: 640px) { main { padding: 10px; } #map { height: 420px; } }
+</style>
+<main>
+  <h1>Real alpine DEM + complex MapLibre styles</h1>
+  <p>Innsbruck · JAXA AW3D30 elevations, hillshade and color relief. The 3,000 weighted heatmap points are a deterministic synthetic load test.</p>
+  <div class="controls">
+    <label>Basemap <select id="style"><option value="liberty">OpenFreeMap Liberty</option><option value="bright">OpenFreeMap Bright</option></select></label>
+    <button id="flat">Flat view</button>
+    <button id="pitch">Pitch 60°</button>
+    <button id="rotate">Rotate 90°</button>
+    <button id="heat" aria-pressed="true">Heatmap: on</button>
+    <button id="benchmark">Run rotation benchmark</button>
+    <button id="quick-benchmark">Quick rotation benchmark (8 steps)</button>
+  </div>
+  <div id="map" aria-label="Alpine terrain map"></div>
+  <p class="note">The blue route and white markers follow the heatmap in style order; both should remain visible above it in flat and pitched views. Terrain is inserted below roads and labels.</p>
+  <div id="status" role="status">Loading real sources…</div>
+  <div id="errors" role="alert"></div>
+  <pre id="results">Benchmark: not run. Each run waits for loaded data, then measures 24 × 15° (full) or 8 × 45° (quick). Initial network load is reported separately. Compare the same run type before and after changes.</pre>
+  <p class="note">Map: <a href="https://openfreemap.org/">OpenFreeMap</a>, <a href="https://openmaptiles.org/">OpenMapTiles</a>, © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>.
+    Elevations: <a href="https://earth.jaxa.jp/en/data/policy/">AW3D30 (JAXA)</a>, served by <a href="https://demotiles.maplibre.org/terrain-tiles/tiles.json">MapLibre demo tiles</a>.
+    Public services require network access; failed requests are shown, never counted as a successful check.</p>
+</main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const suffix = params.has('min') ? '.min.js' : '.js';
+  for (const name of ['microMap', 'microMap.vector']) document.write('<script src="../lib/' + name + suffix + '?test=' + Date.now() + '"><' + '/script>');
+</script>
+<script>
+  const $ = id => document.getElementById(id);
+  const centre = [11.39, 47.27];
+  const map = microMap('#map', { tiles: false, center: centre, zoom: 13, maxPitch: 75, zoomAnimation: false });
+  let layer, busy = false, styleName = '', styleCount = 0, heatVisible = true, tileLoads = 0, demLoads = 0, initialMs = 0;
+  let errors = [];
+  let seed = 19770317;
+  function random() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+  const points = { type: 'FeatureCollection', features: Array.from({ length: 3000 }, (_, i) => ({
+    type: 'Feature', id: i, properties: { weight: .2 + random() * .8 }, geometry: { type: 'Point', coordinates: [
+      centre[0] + .09 + (random() + random() - 1) * .13, centre[1] - .045 + (random() + random() - 1) * .07
+    ] }
+  })) };
+  const route = { type: 'FeatureCollection', features: [
+    { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[11.17, 47.23], [11.28, 47.245], centre, [11.49, 47.29], [11.61, 47.33]] } },
+    ...[[11.28, 47.245], centre, [11.49, 47.29]].map(coordinates => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates } }))
+  ] };
+  function errorMessage(error) { return error && (error.message || error.error && error.error.message) || String(error); }
+  function recordError(error) {
+    errors.push(errorMessage(error));
+    $('errors').textContent = errors.slice(-8).join('\n');
+  }
+  function lock(value) {
+    busy = value;
+    document.querySelectorAll('button, select').forEach(element => { element.disabled = value; });
+  }
+  function status() {
+    if (!layer) return;
+    const stats = layer.getRenderStats();
+    for (const key of Object.keys(stats)) if (key.endsWith('Ms')) stats[key] = +stats[key].toFixed(2);
+    $('status').textContent = `${styleName} · ${styleCount} style layers · ${suffix === '.min.js' ? 'minified' : 'source'} scripts\n` +
+      `Camera: zoom ${map.getZoom().toFixed(2)}, pitch ${map.getPitch().toFixed(0)}°, bearing ${map.getBearing().toFixed(0)}° · ${layer.areTilesLoaded() ? 'LOADED' : 'LOADING'} · errors ${errors.length}\n` +
+      `Tile arrivals: ${tileLoads} vector/raster, including ${demLoads} real DEM · initial settle ${initialMs ? initialMs.toFixed(0) + ' ms' : 'pending'}\n` +
+      JSON.stringify(stats);
+  }
+  async function settle(timeout = 45000) {
+    const deadline = performance.now() + timeout;
+    let stable = 0;
+    while (stable < 5) {
+      await new Promise(requestAnimationFrame);
+      stable = layer && layer.areTilesLoaded() ? stable + 1 : 0;
+      if (performance.now() > deadline) throw new Error('Timed out waiting for all visible tiles to load/render (45 s).');
+    }
+  }
+  async function loadStyle() {
+    lock(true);
+    if (layer) { layer.destroy(); layer = null; }
+    errors = []; tileLoads = demLoads = initialMs = 0;
+    $('errors').textContent = '';
+    $('status').textContent = 'Loading style and real DEM…';
+    const started = performance.now();
+    try {
+      styleName = $('style').selectedOptions[0].textContent;
+      const response = await fetch('https://tiles.openfreemap.org/styles/' + $('style').value, { signal: AbortSignal.timeout(45000) });
+      if (!response.ok) throw new Error('Basemap style HTTP ' + response.status);
+      const style = await response.json();
+      // The demo contains the N047E011 JAXA cell. Its TileJSON advertises
+      // world bounds; use the actual coverage to avoid 404s near the horizon.
+      style.sources['test-dem'] = { type: 'raster-dem', url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json', encoding: 'mapbox', tileSize: 512, maxzoom: 12, bounds: [11, 47, 12, 48] };
+      style.sources['test-points'] = { type: 'geojson', data: points };
+      style.sources['test-route'] = { type: 'geojson', data: route };
+      const additions = [
+        { id: 'test-relief', type: 'color-relief', source: 'test-dem', paint: { 'color-relief-opacity': .34, 'color-relief-color': ['interpolate', ['linear'], ['elevation'], 0, '#c1d9ac', 600, '#75aa76', 1300, '#c4bb83', 2200, '#a18f7b', 3200, '#f5f4ee'] } },
+        { id: 'test-hillshade', type: 'hillshade', source: 'test-dem', paint: { 'hillshade-exaggeration': .7, 'hillshade-illumination-direction': 315, 'hillshade-illumination-anchor': 'viewport', 'hillshade-shadow-color': '#23374a', 'hillshade-highlight-color': '#fff9e8' } },
+        { id: 'test-heat', type: 'heatmap', source: 'test-points', layout: { visibility: heatVisible ? 'visible' : 'none' }, paint: { 'heatmap-radius': 25, 'heatmap-weight': ['get', 'weight'], 'heatmap-intensity': .55, 'heatmap-opacity': .65 } },
+        { id: 'test-route-casing', type: 'line', source: 'test-route', paint: { 'line-color': '#ffffff', 'line-width': 9 } },
+        { id: 'test-route-line', type: 'line', source: 'test-route', paint: { 'line-color': '#164fc8', 'line-width': 5 } },
+        { id: 'test-markers', type: 'circle', source: 'test-route', paint: { 'circle-radius': 9, 'circle-color': '#ffffff', 'circle-stroke-color': '#164fc8', 'circle-stroke-width': 3 } }
+      ];
+      let insertAt = style.layers.findIndex(item => item.type === 'line' || item.type === 'symbol');
+      if (insertAt < 0) insertAt = style.layers.length;
+      style.layers.splice(insertAt, 0, ...additions);
+      styleCount = style.layers.length;
+      layer = await microMapVector.fromStyle(map, style, { worker: false });
+      layer.on('tileload', event => { tileLoads++; if (event.source === 'test-dem') demLoads++; });
+      layer.on('tileerror', event => recordError(event.error || ('Tile failed: ' + event.source + '/' + event.z + '/' + event.x + '/' + event.y)));
+      layer.on('error', recordError);
+      layer.on('sourceerror', recordError);
+      await settle();
+      if (!demLoads) throw new Error('No real DEM tile arrived; terrain has not been verified.');
+      initialMs = performance.now() - started;
+    } catch (error) { recordError(error); }
+    finally { lock(false); status(); }
+  }
+  function quantile(values, fraction) { const ordered = values.slice().sort((a, b) => a - b); return ordered.length ? ordered[Math.min(ordered.length - 1, Math.floor(fraction * ordered.length))] : 0; }
+  function distribution(values) { return `median ${quantile(values, .5).toFixed(2)} ms, p95 ${quantile(values, .95).toFixed(2)} ms, max ${quantile(values, 1).toFixed(2)} ms`; }
+  async function benchmark(stepCount = 24) {
+    lock(true);
+    $('results').textContent = 'Benchmark: warming visible tiles…';
+    const frames = [], steps = [];
+    const phases = Object.fromEntries(['renderMs', 'demMs', 'groundMs', 'heatMs', 'maxCellMs', 'labelMs'].map(key => [key, []]));
+    const longTasks = [];
+    let recording = false, previous = 0, observer, taskObserver, lastRender = 0, missedRenders = 0;
+    function sampleRender() {
+      const stats = layer.getRenderStats();
+      if (!Number.isFinite(stats.frames) || stats.frames === lastRender) return;
+      missedRenders += Math.max(0, stats.frames - lastRender - 1);
+      lastRender = stats.frames;
+      for (const key of Object.keys(phases)) if (Number.isFinite(stats[key])) phases[key].push(stats[key]);
+    }
+    function frame(time) {
+      if (!recording) return;
+      if (previous) frames.push(time - previous);
+      previous = time;
+      sampleRender();
+      observer = requestAnimationFrame(frame);
+    }
+    try {
+      map.setPitch(60); map.setBearing(0);
+      await settle();
+      if (errors.length) throw new Error('Resolve source errors before measuring.');
+      lastRender = layer.getRenderStats().frames;
+      if (typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes.includes('longtask')) {
+        taskObserver = new PerformanceObserver(list => { for (const entry of list.getEntries()) longTasks.push(entry.duration); });
+        taskObserver.observe({ type: 'longtask' });
+      }
+      const started = performance.now();
+      recording = true; observer = requestAnimationFrame(frame);
+      for (let i = 1; i <= stepCount; i++) {
+        const step = performance.now();
+        map.setBearing(i * 360 / stepCount);
+        await settle();
+        steps.push(performance.now() - step);
+        $('results').textContent = `Benchmark: rotation ${i}/${stepCount} complete…`;
+      }
+      const elapsed = performance.now() - started;
+      sampleRender();
+      if (taskObserver) for (const entry of taskObserver.takeRecords()) longTasks.push(entry.duration);
+      if (errors.length) throw new Error('Source errors occurred during benchmark.');
+      const phaseReport = phases.renderMs.length ? Object.entries(phases).filter(([, values]) => values.length).map(([key, values]) =>
+        `${key}: n=${values.length}, ${distribution(values)}${key === 'renderMs' ? ', >50 ms: ' + values.filter(value => value > 50).length : ''}`
+      ).join('\n') + (missedRenders ? `\nUnsampled render frames: ${missedRenders}` : '') : 'Renderer phase samples unavailable in this build.';
+      const taskReport = taskObserver ? `Long tasks (browser main thread, ≥50 ms): n=${longTasks.length}, total ${longTasks.reduce((sum, value) => sum + value, 0).toFixed(1)} ms, ${distribution(longTasks)}` : 'Long-task observation is unavailable in this browser.';
+      $('results').textContent = `${styleName} · ${stepCount} × ${360 / stepCount}° rotation, pitch 60° · heatmap ${heatVisible ? 'on (3,000 points)' : 'off'}\n` +
+        `Elapsed: ${elapsed.toFixed(0)} ms · frame intervals: n=${frames.length}, ${distribution(frames)}\n` +
+        `Step settle: median ${quantile(steps, .5).toFixed(1)} ms, p95 ${quantile(steps, .95).toFixed(1)} ms\n` +
+        phaseReport + '\n' + taskReport + '\n' +
+        'Renderer phases sample each new completed render once; maxCellMs is the slowest ground cell in that frame. DEM time is included in ground time; phases are not additive. Frame intervals include browser scheduling/compositing; step settle includes five stable animation frames. Compare the same run type, style, heatmap state, visible tab and viewport. Network/cache conditions affect first visits.';
+    } catch (error) { $('results').textContent = 'Benchmark failed: ' + errorMessage(error); }
+    finally { recording = false; cancelAnimationFrame(observer); if (taskObserver) taskObserver.disconnect(); lock(false); status(); }
+  }
+  $('style').onchange = loadStyle;
+  $('flat').onclick = () => { map.setPitch(0); status(); };
+  $('pitch').onclick = () => { map.setPitch(60); status(); };
+  $('rotate').onclick = () => { map.setBearing(map.getBearing() + 90); status(); };
+  $('heat').onclick = () => { heatVisible = !heatVisible; layer.setLayoutProperty('test-heat', 'visibility', heatVisible ? 'visible' : 'none'); $('heat').textContent = 'Heatmap: ' + (heatVisible ? 'on' : 'off'); $('heat').setAttribute('aria-pressed', String(heatVisible)); status(); };
+  $('benchmark').onclick = () => benchmark();
+  $('quick-benchmark').onclick = () => benchmark(8);
+  window.addEventListener('error', event => recordError(event.error || event.message));
+  window.addEventListener('unhandledrejection', event => recordError(event.reason));
+  setInterval(status, 500);
+  loadStyle();
+</script>
+</html>

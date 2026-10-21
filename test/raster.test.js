@@ -73,17 +73,19 @@ function createMap() {
   return { container, map: microMap(container, { tiles: false, center: [12.5, 48.6], zoom: 3, zoomAnimation: false }) };
 }
 
-test('renders XYZ and WMS raster layers with bounded mutable style', async () => {
+test('renders XYZ and WMS raster layers with bounded mutable style', async t => {
   imageURLs.length = 0;
   const { map } = createMap();
   const raster = microMapRaster(map, { maxTiles: 12 });
+  t.after(() => { raster.destroy(); map.destroy(); });
   let loads = 0;
   raster.on('tileload', () => loads++);
   raster.addSource('relief', { type: 'raster', tiles: 'https://tiles.test/{z}/{x}/{y}.png', minzoom: 0, maxzoom: 5 });
   raster.addSource('wms', { type: 'wms', url: 'https://wms.test/map?LAYERS=relief&BBOX={bbox-epsg-3857}&WIDTH={width}&HEIGHT={height}' });
   raster.addLayer({ id: 'relief-layer', type: 'raster', source: 'relief', paint: { 'raster-opacity': 0.6 } });
   raster.addLayer({ id: 'wms-layer', type: 'raster', source: 'wms', paint: { 'raster-opacity': 0.4 } });
-  await wait();
+  const deadline = Date.now() + 2000;
+  while (!raster.getCanvas().getContext('2d').operations.some(operation => operation[0] === 'drawImage') && Date.now() < deadline) await wait(5);
   assert.ok(loads > 0);
   assert.ok(imageURLs.some(url => url.includes('/tiles.test/')));
   assert.ok(imageURLs.some(url => url.includes('BBOX=') && url.includes('WIDTH=256')));
@@ -107,16 +109,27 @@ test('raster source changes and failed tiles remain bounded and observable', asy
   const raster = microMapRaster(map, { maxTiles: 4 });
   let errors = 0;
   raster.on('tileerror', () => errors++);
-  raster.addSource('dynamic', { tiles: 'https://tiles.test/fail/{z}/{x}/{y}.png', maxzoom: 3 });
-  raster.addLayer({ id: 'dynamic-layer', type: 'raster', source: 'dynamic' });
-  await wait();
-  assert.ok(errors > 0);
-  raster.getSource('dynamic').setTiles('https://tiles.test/{z}/{x}/{y}.png');
-  raster.redraw();
-  await wait();
-  assert.ok(imageURLs.some(url => url === 'https://tiles.test/3/4/2.png' || url.includes('https://tiles.test/')));
-  raster.destroy();
-  map.destroy();
+  async function waitFor(predicate, message) {
+    const deadline = Date.now() + 2000;
+    while (!predicate() && Date.now() < deadline) await wait(10);
+    assert.ok(predicate(), message);
+  }
+  try {
+    raster.addSource('dynamic', { tiles: 'https://tiles.test/fail/{z}/{x}/{y}.png', maxzoom: 3 });
+    raster.addLayer({ id: 'dynamic-layer', type: 'raster', source: 'dynamic' });
+    await waitFor(() => errors > 0, 'failed tiles emit tileerror within 2 seconds');
+    raster.getSource('dynamic').setTiles('https://tiles.test/{z}/{x}/{y}.png');
+    raster.redraw();
+    const recoveredTile = /^https:\/\/tiles\.test\/3\/\d+\/\d+\.png$/;
+    const context = raster.getCanvas().getContext('2d');
+    await waitFor(() => context.operations.some(operation =>
+      operation[0] === 'drawImage' && recoveredTile.test(operation[1].src)),
+    'tiles from the replacement source render within 2 seconds');
+    assert.ok(imageURLs.some(url => recoveredTile.test(url)), 'replacement source requests exclude the failed URL');
+  } finally {
+    raster.destroy();
+    map.destroy();
+  }
 });
 
 test('raster distribution exposes a package entry', () => {

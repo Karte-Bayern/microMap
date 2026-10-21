@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>microMap · consumer integration checks</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #203340; background: #edf2f5; font: 14px/1.45 system-ui, sans-serif; }
+  main { max-width: 1120px; margin: auto; padding: 18px; }
+  h1 { margin: 0 0 6px; font-size: 24px; }
+  h2 { margin: 0 0 8px; font-size: 18px; }
+  p { margin: 6px 0 14px; }
+  .maps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  section { padding: 12px; border: 1px solid #c8d5de; background: white; border-radius: 7px; }
+  .map { position: relative; width: 100%; height: 300px; overflow: hidden; background: #e8eee9; }
+  button { margin: 14px 0 0; padding: 8px 12px; font: inherit; cursor: pointer; }
+  #result, #metrics { padding: 12px; border-radius: 6px; background: white; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+  .note { color: #546571; font-size: 12px; }
+  .search-marker { min-width: 28px; padding: 4px 7px; border: 2px solid white; border-radius: 16px; background: #2465ba; color: white; text-align: center; font-weight: 700; box-shadow: 0 1px 5px #3456; }
+  @media (max-width: 700px) { .maps { grid-template-columns: 1fr; } }
+</style>
+<main>
+  <h1>Consumer integration checks</h1>
+  <p>Independent synthetic fixtures for Karte.Bayern-style overlay updates and osmmini-style offline presentation, search clusters and rendering quality. No external services or private application code.</p>
+  <div class="maps">
+    <section><h2>Karte.Bayern: separate live overlays</h2><div class="map" id="karte"></div><p class="note">Core camera + vector ground + a separate GeoJSON route and GPS overlay.</p></section>
+    <section><h2>osmmini: style editing and clustered search</h2><div class="map" id="osmmini"></div><p class="note">MapLibre-shaped API, 320 synthetic search points, DOM cluster markers and a live heatmap.</p></section>
+  </div>
+  <button id="rerun">Run integration checks</button>
+  <pre id="result" role="status">RUNNING</pre>
+  <pre id="metrics">Waiting for rendering…</pre>
+  <p class="note">Use <code>?min=1</code> to check the generated minified scripts. Timings are local observations; the assertions check correctness and avoided work, not a fixed frame-rate target.</p>
+</main>
+<script>
+  const minified = new URLSearchParams(location.search).has('min');
+  for (const name of ['microMap', 'microMap.vector', 'microMap.geojson', 'microMap.camera', 'microMap.compose', 'microMap.ui', 'microMap.maplibre']) {
+    document.write('<script src="../lib/' + name + (minified ? '.min.js' : '.js') + '?test=' + Date.now() + '"><' + '/script>');
+  }
+</script>
+<script>
+  const centre = [11.575, 48.137];
+  const result = document.getElementById('result');
+  const metrics = document.getElementById('metrics');
+  const cleanup = [];
+  const checks = [];
+  const observations = [];
+  let running = false;
+  const collection = features => ({ type: 'FeatureCollection', features });
+  const point = (id, x, y, properties = {}) => ({ type: 'Feature', id, properties, geometry: { type: 'Point', coordinates: [centre[0] + x, centre[1] + y] } });
+  const line = (id, coordinates, properties = {}) => ({ type: 'Feature', id, properties, geometry: { type: 'LineString', coordinates: coordinates.map(([x, y]) => [centre[0] + x, centre[1] + y]) } });
+  const building = height => ({ type: 'Feature', id: 1, properties: { height }, geometry: { type: 'Polygon', coordinates: [[[-.0035, -.006], [-.0015, -.006], [-.0015, -.004], [-.0035, -.004], [-.0035, -.006]].map(([x, y]) => [centre[0] + x, centre[1] + y])] } });
+  const roadWidth = ['interpolate', ['linear'], ['zoom'], 9, 1, 16, 5];
+  function baseStyle(extraSources = {}, extraLayers = []) {
+    return { version: 8, sources: {
+      roads: { type: 'geojson', data: collection([
+        line(1, [[-.03, -.003], [.03, .003]]), line(2, [[-.012, -.02], [.012, .02]]),
+        line(3, [[-.03, .009], [.03, .009]])
+      ]) }, ...extraSources
+    }, layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': '#e4eddf' } },
+      { id: 'roads', type: 'line', source: 'roads', layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'visible' }, paint: { 'line-color': '#ffffff', 'line-width': roadWidth } },
+      ...extraLayers
+    ] };
+  }
+  function check(ok, name, detail = '') {
+    checks.push({ ok, name, detail });
+    result.textContent = checks.map(item => (item.ok ? 'PASS ' : 'FAIL ') + item.name + (item.detail ? ': ' + item.detail : '')).join('\n');
+  }
+  async function settle(layer) {
+    const deadline = performance.now() + 45000;
+    let stable = 0;
+    while (stable < 4) {
+      await new Promise(requestAnimationFrame);
+      stable = layer.areTilesLoaded() ? stable + 1 : 0;
+      if (performance.now() > deadline) throw new Error('Visible rendering did not settle within 45 seconds.');
+    }
+  }
+  function groundCells(id, excluded) {
+    return Array.from(document.querySelectorAll('#' + id + ' canvas')).filter(canvas => !excluded.includes(canvas) && !canvas.hasAttribute('data-heatmap-layer') && canvas.width && canvas.height);
+  }
+  function unchanged(before, after) { return before.length > 0 && before.length === after.length && before.every(canvas => after.includes(canvas)); }
+  function pixels(canvas) { return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; }
+  function changedPixels(before, after) {
+    let changed = 0;
+    for (let i = 0; i < Math.min(before.length, after.length); i += 4) {
+      if (Math.abs(before[i] - after[i]) + Math.abs(before[i + 1] - after[i + 1]) + Math.abs(before[i + 2] - after[i + 2]) + Math.abs(before[i + 3] - after[i + 3]) > 8) changed++;
+    }
+    return changed;
+  }
+  async function qualityChecks() {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-10000px;top:0;width:80px;height:64px';
+    document.body.appendChild(host);
+    try {
+      for (const cap of [1, 1.5, 2]) {
+        const map = new microMapGL.Map({ container: host, style: { version: 8, sources: {}, layers: [] }, pixelRatio: cap, worker: false, webgl: false, attributionControl: false });
+        try {
+          await settle(map);
+          const expected = Math.max(1, Math.min(window.devicePixelRatio || 1, cap));
+          const ratio = map.getPixelRatio();
+          const canvas = map.getCanvas();
+          check(Math.abs(ratio - expected) < .001 && canvas.width === Math.round(host.clientWidth * expected), 'Rendering quality ' + cap + ' reports its actual DPR', ratio + ' DPR, ' + canvas.width + ' px canvas');
+        } finally { map.remove(); }
+      }
+    } finally { host.remove(); }
+  }
+  async function run() {
+    if (running) return;
+    running = true;
+    document.getElementById('rerun').disabled = true;
+    while (cleanup.length) cleanup.pop()();
+    checks.length = observations.length = 0;
+    result.textContent = 'RUNNING';
+    const started = performance.now();
+    try {
+      const core = microMap('#karte', { tiles: false, tileSize: 512, center: centre, zoom: 13, pitch: 55, maxPitch: 60, zoomAnimation: false });
+      const vectors = await microMapVector.fromStyle(core, baseStyle(), { worker: false });
+      const composed = microMapCompose(core, { vectors: [vectors], geojson: true });
+      cleanup.push(() => composed.remove());
+      composed.addSource('route', { type: 'geojson', data: collection([line(1, [[-.015, -.005], [0, 0], [.015, .005]])]) });
+      composed.addLayer({ id: 'route', type: 'line', source: 'route', paint: { 'line-color': '#2465ba', 'line-width': 6 } });
+      composed.addSource('gps', { type: 'geojson', data: collection([point(1, -.006, -.003)]) });
+      composed.addLayer({ id: 'gps', type: 'circle', source: 'gps', paint: { 'circle-color': '#d74d50', 'circle-radius': 9 } });
+      await settle(composed);
+      check(composed.areTilesLoaded() && composed.overlays.getSource('gps'), 'Composed map keeps live GeoJSON in a separate overlay');
+      const karteCells = groundCells('karte', [vectors.getCanvas(), composed.overlays.getCanvas()]);
+      const karteBefore = vectors.getRenderStats().frames;
+      const gpsBefore = pixels(composed.overlays.getCanvas());
+      for (let i = 0; i < 12; i++) composed.getSource('gps').setData(collection([point(1, -.006 + i * .001, -.003)]));
+      await settle(composed);
+      const karteAfter = vectors.getRenderStats().frames;
+      check(karteAfter === karteBefore && unchanged(karteCells, groundCells('karte', [vectors.getCanvas(), composed.overlays.getCanvas()])), 'Twelve GPS updates preserve the cached basemap', (karteAfter - karteBefore) + ' vector redraws');
+      check(changedPixels(gpsBefore, pixels(composed.overlays.getCanvas())) > 10, 'GPS overlay visibly moves on the real Canvas');
+
+      const searchData = collection(Array.from({ length: 320 }, (_, i) => point(i, (i % 20 - 9.5) * .00001, (Math.floor(i / 20) - 7.5) * .00001, { kind: 'search' })));
+      const osm = new microMapGL.Map({ container: 'osmmini', center: centre, zoom: 13, pitch: 55, maxPitch: 60, pixelRatio: 1.5, worker: false, webgl: false, attributionControl: false,
+        style: baseStyle({
+          search: { type: 'geojson', cluster: true, clusterRadius: 50, clusterMaxZoom: 16, data: searchData },
+          buildings: { type: 'geojson', data: collection([building(20)]) },
+          density: { type: 'geojson', data: collection([point(1, -.006, -.004)]) },
+          labels: { type: 'geojson', data: collection([point(1, .008, -.004, { title: 'Live label A' })]) }
+        }, [
+          { id: 'buildings', type: 'fill-extrusion', source: 'buildings', paint: { 'fill-extrusion-color': '#b86d52', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': .95 } },
+          { id: 'search', type: 'circle', source: 'search', paint: { 'circle-radius': 0, 'circle-opacity': 0 } },
+          { id: 'density', type: 'heatmap', source: 'density', paint: { 'heatmap-radius': 30, 'heatmap-opacity': .8 } },
+          { id: 'labels', type: 'symbol', source: 'labels', layout: { 'text-field': ['get', 'title'], 'text-size': 12 }, paint: { 'text-color': '#203340' } }
+        ]) });
+      cleanup.push(() => osm.remove());
+      await settle(osm);
+      const osmVectors = osm.vectors[0];
+      const search = osm.querySourceFeatures('search');
+      const cluster = search.find(feature => feature.properties.cluster);
+      check(search.length < 320 && cluster && cluster.properties.point_count === 320, 'Source query exposes clustered search results', search.length + ' displayed results from 320 points');
+      const markerList = [];
+      for (const feature of search) {
+        const element = document.createElement('div'); element.className = 'search-marker'; element.textContent = String(feature.properties.point_count || 1);
+        markerList.push(new microMapGL.Marker({ element }).setLngLat(feature.geometry.coordinates).addTo(osm));
+      }
+      cleanup.push(() => markerList.forEach(marker => marker.remove()));
+      check(document.querySelectorAll('#osmmini .search-marker').length === search.length, 'DOM search markers follow source query results');
+      if (cluster) {
+        const source = osm.getSource('search');
+        const leaves = await source.getClusterLeaves(cluster.properties.cluster_id, 320, 0);
+        const expansion = await source.getClusterExpansionZoom(cluster.properties.cluster_id);
+        check(leaves.length === 320 && new Set(leaves.map(leaf => leaf.id)).size === 320 && expansion > 13 && expansion <= 17, 'Cluster expansion and leaves remain usable', leaves.length + ' unique leaves, expansion zoom ' + expansion);
+      } else check(false, 'Cluster expansion and leaves remain usable', 'No cluster was returned.');
+      check(osm.querySourceFeatures('search', { filter: ['!', ['has', 'point_count']] }).length === 0, 'Source query filters are applied before creating markers');
+
+      const osmCells = groundCells('osmmini', [osm.getCanvas()]);
+      const framesBefore = osmVectors.getRenderStats().frames;
+      const editStarted = performance.now();
+      for (let i = 0; i < 100; i++) {
+        osm.setPaintProperty('roads', 'line-width', structuredClone(roadWidth));
+        osm.setPaintProperty('roads', 'line-color', '#ffffff');
+        osm.setLayoutProperty('roads', 'visibility', 'visible');
+      }
+      const editMs = performance.now() - editStarted;
+      await settle(osm);
+      check(osmVectors.getRenderStats().frames === framesBefore && unchanged(osmCells, groundCells('osmmini', [osm.getCanvas()])), 'Three hundred unchanged style writes avoid vector redraws', editMs.toFixed(2) + ' ms setter loop');
+      const movedSearchData = structuredClone(searchData);
+      for (const feature of movedSearchData.features) {
+        feature.geometry.coordinates[0] += .004;
+        feature.geometry.coordinates[1] += .001;
+      }
+      osm.getSource('search').setData(movedSearchData);
+      await settle(osm);
+      const movedSearch = osm.querySourceFeatures('search');
+      const movedCluster = movedSearch.find(feature => feature.properties.point_count === 320);
+      check(unchanged(osmCells, groundCells('osmmini', [osm.getCanvas()])) && cluster && movedCluster && Math.abs(movedCluster.geometry.coordinates[0] - cluster.geometry.coordinates[0]) > .001, 'Transparent search-source updates refresh clusters without repainting ground', movedSearch.length + ' results at updated coordinates');
+      movedSearch.forEach((feature, index) => {
+        if (markerList[index]) markerList[index].setLngLat(feature.geometry.coordinates);
+      });
+      const buildingBefore = pixels(osm.getCanvas());
+      osm.getSource('buildings').setData(collection([building(220)]));
+      await settle(osm);
+      const buildingPixels = changedPixels(buildingBefore, pixels(osm.getCanvas()));
+      check(unchanged(osmCells, groundCells('osmmini', [osm.getCanvas()])) && buildingPixels > 10, 'Extrusion-only updates change buildings without repainting ground', buildingPixels + ' changed overlay pixels');
+      const heatBefore = pixels(osm.getCanvas());
+      osm.getSource('density').setData(collection([point(1, .006, -.004)]));
+      await settle(osm);
+      check(unchanged(osmCells, groundCells('osmmini', [osm.getCanvas()])), 'Heatmap-only updates preserve pitched ground cells');
+      check(changedPixels(heatBefore, pixels(osm.getCanvas())) > 20, 'Heatmap-only updates still change real Canvas pixels');
+      osm.getSource('labels').setData(collection([point(1, .008, -.004, { title: 'Live label B' })]));
+      await settle(osm);
+      check(unchanged(osmCells, groundCells('osmmini', [osm.getCanvas()])), 'Symbol-only updates preserve pitched ground cells');
+      osm.jumpTo({ zoom: 17 });
+      await settle(osm);
+      check(osm.querySourceFeatures('search').length === 320, 'Search clusters dissolve above their maximum zoom');
+      osm.jumpTo({ zoom: 13 });
+      await settle(osm);
+      await qualityChecks();
+      observations.push((minified ? 'Minified' : 'Source') + ' scripts · synthetic, offline data only');
+      observations.push('Karte.Bayern vector frames after GPS burst: ' + karteBefore + ' → ' + karteAfter);
+      observations.push('osmmini: ' + search.length + ' DOM search markers instead of 320 raw markers');
+      observations.push('Repeated unchanged style writes: 300 in ' + editMs.toFixed(2) + ' ms');
+      observations.push('Total integration check: ' + (performance.now() - started).toFixed(0) + ' ms');
+      observations.push('Karte.Bayern render: ' + JSON.stringify(vectors.getRenderStats()));
+      observations.push('osmmini render: ' + JSON.stringify(osmVectors.getRenderStats()));
+    } catch (error) { check(false, 'Unhandled integration error', error.message || String(error)); }
+    finally {
+      const failed = checks.filter(item => !item.ok).length;
+      result.textContent += '\n\n' + (failed ? failed + ' FAILED' : checks.length + ' PASSED');
+      metrics.textContent = observations.join('\n');
+      document.title = (failed ? 'FAIL' : 'PASS') + ': consumer integration';
+      document.getElementById('rerun').disabled = false;
+      running = false;
+    }
+  }
+  document.getElementById('rerun').onclick = run;
+  run();
+</script>
+</html>

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>microMap terrain and heatmap browser regression</title>
+<style>
+  body { margin: 24px; font: 14px system-ui, sans-serif; color: #17202a; background: #f4f6f8; }
+  h1 { font-size: 24px; margin-bottom: 6px; }
+  .maps { display: flex; flex-wrap: wrap; gap: 16px; }
+  section { background: white; padding: 12px; border: 1px solid #d5dce4; border-radius: 8px; }
+  h2 { margin: 0 0 8px; font-size: 16px; }
+  .map { width: 320px; height: 260px; background: #d8dee4; }
+  button { padding: 8px 12px; margin: 12px 8px 12px 0; }
+  pre { white-space: pre-wrap; line-height: 1.5; }
+</style>
+<h1>Terrain and heatmap regression</h1>
+<p>Local synthetic DEMs and GeoJSON. Real Canvas pixels, no external tile service.</p>
+<div class="maps">
+  <section><h2>Hillshade</h2><div class="map" id="hillshade"></div></section>
+  <section><h2>Color relief</h2><div class="map" id="relief"></div></section>
+  <section><h2>Heatmap</h2><div class="map" id="heat"></div></section>
+</div>
+<button id="flat">Flat view</button><button id="tilt">Pitch 55°</button><button id="rotate">Rotate 90°</button>
+<button id="rerun">Run regression checks</button>
+<pre id="result" role="status">RUNNING</pre>
+<script>
+  // ?min=1 verifies the shipped scripts with exactly the same fixtures.
+  const suffix = new URLSearchParams(location.search).has('min') ? '.min.js' : '.js';
+  for (const name of ['microMap', 'microMap.vector']) {
+    document.write('<script src="../lib/' + name + suffix + '?test=' + Date.now() + '"><' + '/script>');
+  }
+</script>
+<script>
+  const maps = [];
+  const result = document.querySelector('#result');
+  const checks = [];
+  let running = false;
+  function check(ok, name, detail) {
+    checks.push({ ok, name, detail });
+    result.textContent = checks.map(c => (c.ok ? 'PASS ' : 'FAIL ') + c.name + (c.detail ? ': ' + c.detail : '')).join('\n');
+  }
+  function demURL(encode) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const pixels = ctx.createImageData(256, 256);
+    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) pixels.data.set(encode(x, y), 4 * (y * 256 + x));
+    ctx.putImageData(pixels, 0, 0);
+    return canvas.toDataURL() + '#{z}/{x}/{y}';
+  }
+  function terrarium(height) {
+    const value = height + 32768;
+    return [Math.floor(value / 256), Math.floor(value) % 256, Math.round((value % 1) * 256), 255];
+  }
+  const slope = demURL(x => terrarium(x * 20));
+  const ramp = ['interpolate', ['linear'], ['elevation'], 0, '#163f73', 2500, '#4dbb87', 5100, '#fff3bb'];
+  const terrainTiles = new Map();
+  function localTile(url) {
+    const tile = /\/terrain-fixture\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(url);
+    if (!tile) return url;
+    if (!terrainTiles.has(url)) {
+      const z = +tile[1], tx = +tile[2], ty = +tile[3];
+      // One continuous height field across tiles AND levels of detail.
+      terrainTiles.set(url, demURL((x, y) => {
+        const wx = (tx + (x + 0.5) / 256) / 2 ** z;
+        const wy = (ty + (y + 0.5) / 256) / 2 ** z;
+        return terrarium(2500 + 1800 * Math.cos(wx * 512 * Math.PI) * Math.cos(wy * 512 * Math.PI));
+      }).split('#')[0]);
+    }
+    return terrainTiles.get(url);
+  }
+  function terrainStyle(type, paint, source) {
+    return { version: 8, sources: { dem: source || { type: 'raster-dem', tiles: [slope], encoding: 'terrarium', tileSize: 256, maxzoom: 8 } },
+      layers: [{ id: type, type, source: 'dem', paint }] };
+  }
+  async function create(id, style) {
+    const map = microMap('#' + id, { tiles: false, center: [0.703125, 0.703107], zoom: 8, maxPitch: 75, zoomAnimation: false });
+    const layer = await microMapVector.fromStyle(map, style, { worker: false, transformRequest: localTile });
+    const entry = { map, layer, id };
+    maps.push(entry);
+    return entry;
+  }
+  async function settle(entry) {
+    const deadline = performance.now() + 10000;
+    let stable = 0;
+    while (stable < 4) {
+      await new Promise(requestAnimationFrame);
+      stable = entry.layer.areTilesLoaded() ? stable + 1 : 0;
+      if (performance.now() > deadline) throw new Error(entry.id + ' did not settle');
+    }
+  }
+  function pixel(entry, x = 160, y = 130) {
+    const canvas = entry.layer.getCanvas();
+    const scale = canvas.width / 320;
+    return Array.from(canvas.getContext('2d').getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data);
+  }
+  function delta(a, b) { return a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0); }
+  function cells(entry) {
+    return Array.from(document.querySelectorAll('#' + entry.id + ' canvas')).filter(c => c !== entry.layer.getCanvas() && c.width && c.height);
+  }
+  function cellPixel(canvas) { return Array.from(canvas.getContext('2d').getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data); }
+  // Completed cell jobs replace their canvases atomically. Match the same
+  // ground rectangle across rotations, rather than its old DOM node.
+  function cellKey(canvas) { return [canvas.parentElement.style.transform, canvas.style.left, canvas.style.top, canvas.style.width, canvas.style.height].join('|'); }
+  const points = { type: 'FeatureCollection', features: [
+    { type: 'Feature', properties: { weight: 1 }, geometry: { type: 'Point', coordinates: [0.703125, 0.703107] } },
+    { type: 'Feature', properties: { weight: 3 }, geometry: { type: 'Point', coordinates: [1.03, 0.82] } }
+  ] };
+  let hills, relief, heat;
+  async function run() {
+    if (running) return;
+    running = true;
+    checks.length = 0;
+    result.textContent = 'RUNNING';
+    try {
+      for (const entry of maps) { entry.map.setPitch(0); entry.map.setBearing(0); }
+      hills.layer.setStyle(terrainStyle('hillshade', { 'hillshade-illumination-direction': 270, 'hillshade-illumination-anchor': 'map' }));
+      relief.layer.setStyle(terrainStyle('color-relief', { 'color-relief-color': ramp }));
+      heat.layer.setPaintProperty('heat', 'heatmap-weight', ['get', 'weight']);
+      await Promise.all(maps.map(settle));
+      check(pixel(hills)[3] > 0, 'Hillshade produces shaded pixels');
+      check(pixel(relief, 80)[1] > pixel(relief, 80)[0] && pixel(relief, 240)[0] > pixel(relief, 80)[0], 'Color relief follows elevation ramp');
+      check(pixel(heat)[3] > 0 && pixel(heat, 10, 10)[3] === 0, 'Heatmap kernel renders with a transparent exterior');
+      heat.layer.setPaintProperty('heat', 'heatmap-weight', 0);
+      await settle(heat);
+      check(pixel(heat)[3] === 0, 'Heatmap weight update clears old density');
+      heat.layer.setPaintProperty('heat', 'heatmap-weight', ['get', 'weight']);
+      heat.layer.setPaintProperty('heat', 'heatmap-radius', 0);
+      await settle(heat);
+      check(pixel(heat)[3] === 0, 'Zero heatmap radius hides kernels');
+      heat.layer.setPaintProperty('heat', 'heatmap-radius', 42);
+      const before = pixel(hills);
+      hills.map.setBearing(180);
+      await settle(hills);
+      const after = pixel(hills);
+      check(delta(before, after) < 8, 'Map-anchored hillshade stays fixed during rotation', before + ' → ' + after);
+      hills.layer.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'viewport');
+      await settle(hills);
+      check(delta(before, pixel(hills)) > 30, 'Viewport-anchored hillshade follows rotation');
+      hills.layer.setPaintProperty('hillshade', 'hillshade-illumination-direction', 0);
+      hills.map.setBearing(90);
+      await settle(hills);
+      check(pixel(hills)[0] < 20, 'Viewport north light reaches the east-facing side at bearing 90°', pixel(hills).join(','));
+      hills.layer.setPaintProperty('hillshade', 'hillshade-illumination-direction', 270);
+      hills.map.setBearing(0);
+      hills.map.setPitch(55);
+      await settle(hills);
+      const samples = new Map(cells(hills).map(c => [cellKey(c), cellPixel(c)]));
+      hills.map.setBearing(30);
+      await settle(hills);
+      const overlapping = cells(hills).filter(c => samples.has(cellKey(c)) && samples.get(cellKey(c))[3] > 0);
+      check(overlapping.length > 0 && overlapping.every(c => delta(samples.get(cellKey(c)), cellPixel(c)) > 3), 'Tilted hillshade refreshes cached cells on rotation', overlapping.length + ' overlapping ground cells');
+      hills.map.setPitch(0);
+      hills.map.setBearing(0);
+      hills.layer.setStyle(terrainStyle('hillshade', {}, { type: 'raster-dem', tileSize: 256, encoding: 'terrarium',
+        tiles: [demURL((x, y) => x >= 120 && x < 136 && y >= 120 && y < 136 ? [0, 0, 0, 0] : terrarium(100))] }));
+      await settle(hills);
+      const hillCanvas = hills.layer.getCanvas();
+      const noDataPixels = hillCanvas.getContext('2d').getImageData(0, 0, hillCanvas.width, hillCanvas.height).data;
+      check(noDataPixels.every((v, i) => i % 4 !== 3 || v === 0), 'Transparent DEM holes do not create shadows on flat ground');
+      hills.layer.setStyle(terrainStyle('hillshade', { 'hillshade-illumination-direction': 315, 'hillshade-exaggeration': 0.8 },
+        { type: 'raster-dem', tileSize: 256, encoding: 'terrarium', tiles: ['/terrain-fixture/{z}/{x}/{y}.png'], maxzoom: 8 }));
+      relief.layer.setStyle(terrainStyle('color-relief', { 'color-relief-color': ['step', ['elevation'], '#0000ff', 1, '#ff0000'] },
+        { type: 'raster-dem', tiles: [demURL(() => [100, 0, 0, 255])], tileSize: 256, encoding: 'custom', redFactor: 1, greenFactor: 0, blueFactor: 0, baseShift: -100 }));
+      await settle(relief);
+      check(pixel(relief)[2] > 240 && pixel(relief)[0] < 10, 'Custom DEM baseShift is added to elevation', pixel(relief).join(','));
+      relief.layer.setStyle(terrainStyle('color-relief', { 'color-relief-color': ramp, 'color-relief-opacity': 0.4 }));
+      await settle(relief);
+      check(Math.abs(pixel(relief)[3] - 102) <= 2, 'Color-relief opacity updates real pixels');
+      relief.layer.setPaintProperty('color-relief', 'color-relief-opacity', 1);
+      for (const entry of maps) { entry.map.setPitch(55); entry.map.setBearing(0); }
+      await Promise.all(maps.map(settle));
+      check(maps.every(e => e.layer.getRenderStats().mode === 'tilted' && e.layer.areTilesLoaded()), 'All three layers settle in perspective');
+      check(pixel(heat)[3] > 0, 'Heatmap remains visible in perspective');
+      heat.layer.addLayer({ id: 'above-heat', type: 'circle', source: 'points', paint: { 'circle-radius': 14, 'circle-color': '#ffff00' } });
+      await settle(heat);
+      const heatBand = document.querySelector('#heat canvas[data-heatmap-layer="heat"]');
+      const groundBand = heatBand && heatBand.nextElementSibling;
+      check(heatBand && groundBand && groundBand.tagName === 'DIV' && groundBand.querySelectorAll('canvas').length > 0,
+        'Ground layers above a heatmap retain their compositor order in perspective');
+      check(groundBand && Array.from(groundBand.querySelectorAll('canvas')).some(canvas => {
+        const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        for (let p = 0; p < data.length; p += 4) if (data[p] > 240 && data[p + 1] > 240 && data[p + 2] < 10 && data[p + 3] > 240) return true;
+        return false;
+      }), 'Upper ground band contains the opaque circle pixels');
+      heat.layer.setPaintProperty('above-heat', 'circle-color', '#ff00ff');
+      await settle(heat);
+      check(Array.from(groundBand.querySelectorAll('canvas')).some(canvas => {
+        const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        for (let p = 0; p < data.length; p += 4) if (data[p] > 240 && data[p + 1] < 10 && data[p + 2] > 240 && data[p + 3] > 240) return true;
+        return false;
+      }), 'Paint updates invalidate cached ground above a heatmap');
+      heat.layer.setLayoutProperty('heat', 'visibility', 'none');
+      await settle(heat);
+      check(!document.querySelector('#heat canvas[data-heatmap-layer]'), 'Hiding heatmap releases its compositor bands');
+      heat.layer.setLayoutProperty('heat', 'visibility', 'visible');
+      heat.layer.removeLayer('above-heat');
+      await settle(heat);
+      check(pixel(heat)[3] > 0 && !document.querySelector('#heat canvas[data-heatmap-layer]'), 'Removing upper ground restores heatmap overlay');
+    } catch (error) { check(false, 'Unexpected error', error.stack || String(error)); }
+    running = false;
+    const failures = checks.filter(c => !c.ok).length;
+    document.title = failures ? 'FAIL: terrain browser regression' : 'PASS: terrain browser regression';
+    result.textContent += '\n\n' + (failures ? failures + ' FAILED' : checks.length + ' PASSED');
+  }
+  (async () => {
+    hills = await create('hillshade', terrainStyle('hillshade', { 'hillshade-illumination-direction': 270 }));
+    relief = await create('relief', terrainStyle('color-relief', { 'color-relief-color': ramp }));
+    heat = await create('heat', { version: 8, sources: { points: { type: 'geojson', data: points } }, layers: [
+      { id: 'heat', type: 'heatmap', source: 'points', paint: { 'heatmap-radius': 42, 'heatmap-weight': ['get', 'weight'] } }
+    ] });
+    for (const [id, action] of [['flat', e => e.map.setPitch(0)], ['tilt', e => e.map.setPitch(55)], ['rotate', e => e.map.setBearing(e.map.getBearing() + 90)]]) {
+      document.getElementById(id).onclick = () => { if (!running) maps.forEach(action); };
+    }
+    document.querySelector('#rerun').onclick = run;
+    await run();
+  })().catch(error => { result.textContent = 'FAIL ' + error.stack; document.title = 'FAIL'; });
+</script>
+</html>
