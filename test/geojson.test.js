@@ -13,6 +13,7 @@ class RecordingContext {
     this.fillStyle = '#000';
     this.strokeStyle = '#000';
     this.lineWidth = 1;
+    this.lineJoin = 'miter';
     this.font = '10px sans-serif';
     this.textAlign = 'start';
     this.textBaseline = 'alphabetic';
@@ -22,7 +23,7 @@ class RecordingContext {
   clearRect(...values) { this.operations.push(['clearRect', ...values]); }
   save() {
     this.operations.push(['save']);
-    this.state.push({ globalAlpha: this.globalAlpha, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline });
+    this.state.push({ globalAlpha: this.globalAlpha, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, lineJoin: this.lineJoin, font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline });
   }
   restore() { this.operations.push(['restore']); Object.assign(this, this.state.pop() || {}); }
   beginPath() { this.operations.push(['beginPath']); }
@@ -32,7 +33,9 @@ class RecordingContext {
   fill(...values) { this.operations.push(['fill', this.fillStyle, this.globalAlpha, ...values]); }
   stroke(...values) { this.operations.push(['stroke', this.strokeStyle, this.lineWidth, this.globalAlpha, ...values]); }
   arc(...values) { this.operations.push(['arc', ...values]); }
-  fillText(...values) { this.operations.push(['fillText', ...values]); }
+  fillText(...values) { this.operations.push(['fillText', ...values, this.fillStyle, this.globalAlpha]); }
+  strokeText(...values) { this.operations.push(['strokeText', ...values, this.strokeStyle, this.lineWidth, this.globalAlpha, this.lineJoin]); }
+  setLineDash(values) { this.operations.push(['setLineDash', values.slice()]); }
 }
 
 class FakeElement {
@@ -504,4 +507,160 @@ test('measurement append failure rolls back records and supports setData-only ad
   tool.line([0, 0], [1, 0]);
   assert.equal(source.getData().features.length, 2);
   tool.destroy(); overlay.destroy(); map.destroy();
+});
+
+// Interpret the recorded Canvas path with its selected winding rule. This
+// checks coverage, including overlap, without relying on a browser rasteriser.
+function recordedFillContains(operations, point) {
+  let rings = [], current;
+  for (const operation of operations) {
+    if (operation[0] === 'beginPath') rings = [];
+    else if (operation[0] === 'moveTo') { current = []; rings.push(current); current.push(operation.slice(1)); }
+    else if (operation[0] === 'lineTo') current.push(operation.slice(1));
+    else if (operation[0] === 'fill') {
+      let winding = 0;
+      for (const ring of rings) for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        const cross = (b[0] - a[0]) * (point[1] - a[1]) - (point[0] - a[0]) * (b[1] - a[1]);
+        if (a[1] <= point[1] && b[1] > point[1] && cross > 0) winding++;
+        else if (a[1] > point[1] && b[1] <= point[1] && cross < 0) winding--;
+      }
+      return operation[3] === 'evenodd' ? Math.abs(winding) % 2 === 1 : winding !== 0;
+    }
+  }
+  return false;
+}
+
+test('polygon fill and picking preserve holes with either ring winding', async () => {
+  const { map } = createMap();
+  const overlay = microMapGeoJSON(map);
+  const outer = [[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]];
+  const hole = [[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]];
+  try {
+    overlay.addSource('area', { type: 'geojson', data: { type: 'Polygon', coordinates: [outer, hole] } });
+    overlay.addLayer({ id: 'fill', type: 'fill', source: 'area' });
+    for (const rings of [[outer, hole], [outer, hole.slice().reverse()]]) {
+      for (const geometry of [
+        { type: 'Polygon', coordinates: rings },
+        { type: 'MultiPolygon', coordinates: [rings] },
+        { type: 'GeometryCollection', geometries: [{ type: 'Polygon', coordinates: rings }] }
+      ]) {
+        const operations = overlay.getCanvas().getContext('2d').operations;
+        operations.length = 0;
+        overlay.getSource('area').setData(geometry);
+        await wait();
+        const fill = operations.find(operation => operation[0] === 'fill');
+        assert.equal(fill[3], 'nonzero', 'normalised rings keep component overlap filled');
+        assert.equal(recordedFillContains(operations, map.project([0, 0])), false, 'the drawn hole remains empty');
+        assert.equal(recordedFillContains(operations, map.project([25, 0])), true, 'the surrounding polygon is filled');
+        assert.equal(overlay.queryRenderedFeatures(map.project([0, 0])).length, 0, 'the hole remains empty');
+        assert.equal(overlay.queryRenderedFeatures(map.project([25, 0])).length, 1, 'the surrounding polygon remains visible');
+        assert.equal(overlay.queryRenderedFeatures(map.project([10, 0])).length, 1, 'hole boundaries remain selectable');
+      }
+    }
+  } finally { overlay.destroy(); map.destroy(); }
+});
+
+test('overlapping polygon components are filled once without changing source winding', async () => {
+  const { map } = createMap();
+  const overlay = microMapGeoJSON(map);
+  const outer = [[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]];
+  const hole = [[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]];
+  const second = [[-5, -20], [-5, 20], [60, 20], [60, -20], [-5, -20]];
+  const geometry = { type: 'GeometryCollection', geometries: [
+    { type: 'Polygon', coordinates: [outer, hole] },
+    { type: 'Polygon', coordinates: [second] }
+  ] };
+  const original = JSON.parse(JSON.stringify(geometry));
+  const project = map.project;
+  let projections = 0;
+  map.project = coordinate => { projections++; return project(coordinate); };
+  try {
+    overlay.addSource('area', { type: 'geojson', data: geometry });
+    overlay.addLayer({ id: 'fill', type: 'fill', source: 'area', paint: { 'fill-opacity': .4 } });
+    await wait();
+    assert.equal(projections, outer.length + hole.length + second.length, 'each ring vertex is projected once');
+    const operations = overlay.getCanvas().getContext('2d').operations;
+    assert.deepEqual(operations.filter(operation => operation[0] === 'fill').map(operation => operation[2]), [.4], 'one fill applies opacity once across the complete feature');
+    for (const [coordinate, expected] of [[[-7, 0], false], [[0, 0], true], [[30, 0], true], [[50, 0], true], [[80, 0], false]]) {
+      assert.equal(recordedFillContains(operations, project(coordinate)), expected, 'drawn coverage at ' + coordinate);
+      assert.equal(overlay.queryRenderedFeatures(project(coordinate)).length > 0, expected, 'picking coverage at ' + coordinate);
+    }
+    assert.deepEqual(geometry, original, 'caller data retains its original ring order');
+    assert.deepEqual(overlay.getSource('area').getData().features[0].geometry, original, 'source snapshots also retain their original ring order');
+  } finally { overlay.destroy(); map.destroy(); }
+});
+
+test('GeoJSON labels draw data-driven halos behind text and preserve default behaviour', async () => {
+  const { map } = createMap();
+  const overlay = microMapGeoJSON(map);
+  try {
+    overlay.addSource('labels', { type: 'geojson', data: {
+      type: 'Feature', properties: { title: 'Route 7', halo: '#fefefe', width: 2 }, geometry: { type: 'Point', coordinates: [0, 0] }
+    } });
+    overlay.addLayer({ id: 'label', type: 'symbol', source: 'labels', layout: {
+      'text-field': ['get', 'title'], 'text-size': 16, 'text-offset': [.5, -.25]
+    }, paint: { 'text-color': '#123456', 'text-opacity': .6 } });
+    await wait();
+    const context = overlay.getCanvas().getContext('2d'), operations = context.operations;
+    assert.equal(operations.filter(operation => operation[0] === 'strokeText').length, 0, 'labels have no default halo');
+    operations.length = 0;
+    overlay.setPaintProperties('label', { 'text-halo-color': ['get', 'halo'], 'text-halo-width': ['get', 'width'] });
+    await wait();
+    const text = operations.filter(operation => operation[0] === 'strokeText' || operation[0] === 'fillText');
+    assert.deepEqual(text, [
+      ['strokeText', 'Route 7', 136, 124, '#fefefe', 4, .6, 'round'],
+      ['fillText', 'Route 7', 136, 124, '#123456', .6]
+    ], 'halo and text share the anchor, offset and opacity');
+    assert.equal(context.lineWidth, 1, 'text rendering restores the previous canvas stroke width');
+    assert.equal(context.lineJoin, 'miter', 'the halo join does not leak into later geometry');
+    operations.length = 0;
+    overlay.setPaintProperty('label', 'text-halo-width', 0);
+    await wait();
+    assert.equal(operations.filter(operation => operation[0] === 'strokeText').length, 0, 'zero width removes the halo');
+    assert.equal(operations.filter(operation => operation[0] === 'fillText').length, 1, 'text still renders');
+    operations.length = 0;
+    overlay.setPaintProperties('label', { 'text-halo-width': 2, 'text-halo-color': undefined });
+    await wait();
+    assert.equal(operations.filter(operation => operation[0] === 'strokeText').length, 0, 'a width without halo colour remains transparent');
+  } finally { overlay.destroy(); map.destroy(); }
+});
+
+test('GeoJSON line dash arrays retain numeric literal values', async () => {
+  const { map } = createMap();
+  const overlay = microMapGeoJSON(map);
+  try {
+    overlay.addSource('route', { type: 'geojson', data: { type: 'LineString', coordinates: [[-30, 0], [30, 0]] } });
+    overlay.addLayer({ id: 'route', type: 'line', source: 'route', paint: { 'line-dasharray': [2, 1] } });
+    await wait();
+    const dashes = overlay.getCanvas().getContext('2d').operations.filter(operation => operation[0] === 'setLineDash');
+    assert.deepEqual(dashes, [['setLineDash', [2, 1]], ['setLineDash', []]], 'literal dash arrays are applied and reset after the route');
+  } finally { overlay.destroy(); map.destroy(); }
+});
+
+test('GeoJSON circle outlines render and remain selectable independently of fill opacity', async () => {
+  const { map } = createMap();
+  const overlay = microMapGeoJSON(map);
+  try {
+    overlay.addSource('point', { type: 'geojson', data: { type: 'Point', coordinates: [0, 0] } });
+    overlay.addLayer({ id: 'circle', type: 'circle', source: 'point', paint: {
+      'circle-radius': 10, 'circle-color': '#123456', 'circle-opacity': 0,
+      'circle-stroke-color': '#fedcba', 'circle-stroke-width': 4, 'circle-stroke-opacity': .75
+    } });
+    await wait();
+    const operations = overlay.getCanvas().getContext('2d').operations;
+    assert.equal(operations.filter(operation => operation[0] === 'fill').length, 0, 'zero opacity avoids the circle fill');
+    assert.deepEqual(operations.filter(operation => operation[0] === 'stroke'), [['stroke', '#fedcba', 4, .75]]);
+    assert.equal(overlay.queryRenderedFeatures([138, 128], { radius: 0 })[0].layer.id, 'circle', 'the visible outline remains selectable');
+    operations.length = 0;
+    overlay.setPaintProperty('circle', 'circle-stroke-opacity', 0);
+    await wait();
+    assert.equal(operations.filter(operation => operation[0] === 'stroke' || operation[0] === 'fill').length, 0);
+    assert.deepEqual(overlay.queryRenderedFeatures([138, 128], { radius: 0 }), [], 'a fully transparent circle is not selectable');
+    operations.length = 0;
+    overlay.setPaintProperty('circle', 'circle-opacity', .5);
+    await wait();
+    assert.deepEqual(operations.filter(operation => operation[0] === 'fill'), [['fill', '#123456', .5, 'nonzero']]);
+    assert.equal(operations.filter(operation => operation[0] === 'stroke').length, 0, 'hidden outlines do not inherit the fill opacity');
+  } finally { overlay.destroy(); map.destroy(); }
 });

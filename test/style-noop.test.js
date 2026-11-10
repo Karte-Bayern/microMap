@@ -163,6 +163,25 @@ test('overlay filter snapshots distinguish mutation and resubmission from a no-o
   } finally { view.layer.destroy(); }
 });
 
+test('feature-state snapshots distinguish edits from unchanged submissions', () => {
+  const view = fixture('vector');
+  const target = { source: 'points', id: 'point' };
+  const state = { detail: { selected: true } };
+  try {
+    view.layer.setFeatureState(target, state); view.flush();
+    state.detail.selected = false;
+    assert.equal(view.layer.getFeatureState(target).detail.selected, true, 'submitted state is isolated from caller mutation');
+    view.layer.setFeatureState(target, state);
+    assert.equal(view.frames.size, 1, 'a changed nested state schedules a frame');
+    view.flush();
+    assert.equal(view.layer.getFeatureState(target).detail.selected, false);
+    view.layer.setFeatureState(target, { detail: { selected: false } });
+    assert.equal(view.frames.size, 0, 'equivalent nested state is a no-op');
+    view.layer.removeFeatureState(target, 'missing');
+    assert.equal(view.frames.size, 0);
+  } finally { view.layer.destroy(); }
+});
+
 test('compose avoids unrelated attribution refreshes while preserving visibility credits and styledata', () => {
   const view = fixture('vector');
   let timerID = 0, refreshes = 0, events = 0;

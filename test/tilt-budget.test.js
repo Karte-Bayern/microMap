@@ -240,6 +240,77 @@ test('heatmap-only source data does not repaint either ground band', () => {
   } finally { view.layer.destroy(); }
 });
 
+test('overlay feature state preserves ground textures and unfinished work', () => {
+  const view = scene({ bands: true });
+  try {
+    view.frame();
+    const pending = view.staging().slice();
+    view.layer.setFeatureState({ source: 'empty', id: 1 }, { selected: true });
+    view.frame();
+    assert.deepEqual(view.staging(), pending, 'overlay state does not restart an unfinished ground job');
+    view.settle();
+    const ground = view.liveCells().slice();
+    view.layer.setFeatureState({ source: 'empty', id: 1 }, { selected: false });
+    assert.equal(view.frame(), 0, 'overlay state spends no ground painting time');
+    assert.deepEqual(view.liveCells(), ground);
+    view.layer.removeFeatureState({ source: 'empty', id: 1 });
+    assert.equal(view.frame(), 0);
+    assert.deepEqual(view.liveCells(), ground);
+  } finally { view.layer.destroy(); }
+});
+
+test('only relevant ground state invalidates cached cells, including reset', () => {
+  const view = scene();
+  const target = { source: 'points', id: 0 };
+  try {
+    view.layer.setPaintProperty('ground', 'circle-color', ['case', ['boolean', ['feature-state', 'selected'], false], '#00ff00', ['get', 'color']]);
+    view.settle();
+    const ground = view.liveCells()[0];
+    view.layer.setFeatureState({ source: 'empty', id: 1 }, { selected: true });
+    assert.equal(view.frame(), 0, 'another source cannot invalidate a state-dependent ground layer');
+    assert.equal(view.liveCells()[0], ground);
+    view.layer.setFeatureState(target, { selected: true });
+    view.settle();
+    assert.notEqual(view.liveCells()[0], ground);
+    assert.ok(view.liveCells()[0].paints.some(paint => paint[1] === '#00ff00'));
+    const selected = view.liveCells()[0];
+    const frames = view.layer.getRenderStats().frames;
+    view.layer.setFeatureState(target, { selected: true });
+    view.layer.removeFeatureState(target, 'missing');
+    view.frame();
+    assert.equal(view.layer.getRenderStats().frames, frames, 'identical state and absent keys do not schedule rendering');
+    assert.equal(view.liveCells()[0], selected);
+    view.layer.removeFeatureState();
+    view.settle();
+    assert.ok(!view.liveCells()[0].paints.some(paint => paint[1] === '#00ff00'), 'reset clears all dependent paints');
+    const resetFrames = view.layer.getRenderStats().frames;
+    view.layer.removeFeatureState(); view.frame();
+    assert.equal(view.layer.getRenderStats().frames, resetFrames, 'an empty reset is a no-op');
+  } finally { view.layer.destroy(); }
+});
+
+test('source-wide feature state removal covers vector source layers independently', () => {
+  const view = scene();
+  const road = { source: 'base', sourceLayer: 'roads', id: 1 };
+  const land = { source: 'base', sourceLayer: 'land', id: 1 };
+  const other = { source: 'other', sourceLayer: 'roads', id: 1 };
+  try {
+    for (const target of [road, land, other]) view.layer.setFeatureState(target, { selected: true });
+    view.layer.removeFeatureState({ source: 'base', sourceLayer: 'roads' });
+    assert.equal(view.layer.getFeatureState(road).selected, undefined);
+    assert.equal(view.layer.getFeatureState(land).selected, true);
+    view.layer.setFeatureState(road, { selected: true });
+    view.layer.removeFeatureState({ source: 'base' });
+    assert.equal(view.layer.getFeatureState(road).selected, undefined);
+    assert.equal(view.layer.getFeatureState(land).selected, undefined);
+    assert.equal(view.layer.getFeatureState(other).selected, true, 'other sources keep their state');
+    const geojson = { source: 'points', id: 0 };
+    view.layer.setFeatureState(geojson, { selected: true });
+    view.layer.removeFeatureState({ source: 'points', sourceLayer: 'ignored-for-geojson' });
+    assert.equal(view.layer.getFeatureState(geojson).selected, undefined);
+  } finally { view.layer.destroy(); }
+});
+
 test('cluster-level changes refresh ground even across a tiny overzoom step', () => {
   const view = scene();
   try {

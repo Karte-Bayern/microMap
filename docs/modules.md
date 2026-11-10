@@ -70,6 +70,10 @@ osmmini, keep frequently updated data separate from the basemap:
 - Repeating the same paint, layout, filter or zoom-range values does not
   recompile or redraw a layer. Fresh arrays with the same expression contents
   count as unchanged. Real changes still invalidate the affected rendering.
+- Feature-state updates invalidate dependent buckets only in the affected
+  source. Pitched ground textures remain cached when their visible layers do
+  not use that source's state. Repeated equivalent state and removal of absent
+  keys schedule no rendering; submitted nested state values are copied.
 - `querySourceFeatures()` applies GeoJSON filters and returns clusters at the
   current 512px style zoom, even when the basemap is overzoomed. DOM search
   markers can use these results with `getClusterLeaves()` and
@@ -198,6 +202,18 @@ Layer types are `fill`, `line`, `circle` and `symbol`. Replace data with
 `getSource(id).setData(data)`; `getData()` returns a copy. Sources validate and
 copy input, including nested properties. `updateData(diff)` is available for
 collections with unique feature IDs. Fetch remote GeoJSON in application code.
+
+Symbol overlays support `text-halo-color` and `text-halo-width` for a contour
+behind their text, including the module's data and zoom expressions. The width
+defaults to zero. Numeric arrays work directly for `text-offset` and
+`line-dasharray`, or can be returned by an expression.
+
+Circle fill and outline have independent opacity: `circle-opacity: 0` with
+a positive `circle-stroke-width` and `circle-stroke-opacity` keeps a visible,
+queryable ring in both the vector renderer and the GeoJSON overlay.
+Polygon holes remain empty regardless of ring winding. Overlapping polygon
+components share one fill, preserving their union and applying opacity once;
+source coordinates retain their original order.
 
 Use `setPaintProperty()`, `setLayoutProperty()`, `setFilter()`,
 `queryRenderedFeatures()` and `getBounds(sourceId?)` to update or inspect the
