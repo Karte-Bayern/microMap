@@ -18,16 +18,19 @@ declare namespace formats {
     [key: string]: unknown;
   }
   interface Options {
-    format?: 'geojson' | 'topojson' | 'geojson-seq';
+    format?: 'geojson' | 'topojson' | 'geojson-seq' | 'osm';
     /** Named TopoJSON object(s); omitted selects all objects. */
     object?: string | string[];
     maxFeatures?: number;
     maxCoordinates?: number;
-    /** Invalid sequence records throw unless this callback is supplied. */
+    /** Include untagged OSM nodes that are otherwise only geometry helpers. */
+    includeUntaggedNodes?: boolean;
+    /** Invalid records/elements throw unless supplied; index starts at one. */
     onError?: (error: Error, recordIndex: number) => void;
   }
   function parse(input: unknown, options?: Options): FeatureCollection;
   function topojson(input: unknown, options?: Options): FeatureCollection;
   function geojsonSeq(input: string, options?: Options): FeatureCollection;
+  function osm(input: unknown, options?: Options): FeatureCollection;
 }
 export = formats;

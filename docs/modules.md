@@ -225,7 +225,8 @@ Call `destroy()` when the overlay is no longer needed.
 The optional `formats` module converts
 [TopoJSON 1.0](https://github.com/topojson/topojson-specification) and
 [GeoJSON Text Sequences (RFC 8142)](https://www.rfc-editor.org/rfc/rfc8142)
-into GeoJSON FeatureCollections. It also normalises ordinary GeoJSON input.
+into GeoJSON FeatureCollections. It also imports OSM/Overpass JSON and
+normalises ordinary GeoJSON input.
 It has no runtime dependencies and is not included in the general-purpose
 bundle; load it only where data imports are needed.
 
@@ -248,9 +249,10 @@ Classic scripts use `lib/microMap.formats.min.js` and the global
 
 | Method | Input and result |
 | --- | --- |
-| `parse(input, options?)` | JSON object or text; detects Topology, ordinary GeoJSON or RS-framed sequences. Set `format` to `topojson`, `geojson` or `geojson-seq` to require that format. |
+| `parse(input, options?)` | JSON object or text; detects Topology, ordinary GeoJSON, OSM/Overpass `elements` or RS-framed sequences. Set `format` to `topojson`, `geojson`, `osm` or `geojson-seq` to require that format. |
 | `topojson(input, options?)` | Topology object or JSON text; `object` selects a named object or array of names. Omit it to merge all named objects in input order. |
 | `geojsonSeq(text, options?)` | Complete sequence text with ASCII record separators (`\u001e`), including pretty-printed and mixed Geometry/Feature/FeatureCollection records. |
+| `osm(input, options?)` | OSM/Overpass JSON object or text with `elements`; returns real node, way and area-relation geometries as GeoJSON. |
 
 TopoJSON conversion handles shared and reversed arcs, delta-encoded quantized
 arcs, scale/translate transforms, all geometry types, IDs, properties and
@@ -269,6 +271,23 @@ features, and features may have null geometry. `maxFeatures` defaults to 50,000
 and `maxCoordinates` to 1,000,000; nested data is limited to 32 levels. The module
 parses complete inputs, not streaming chunks, and performs no CRS reprojection.
 Coordinates passed to a map must already be WGS 84 longitude/latitude.
+
+OSM imports support nodes, ways with referenced nodes or Overpass `out geom`,
+and multipolygon/boundary area relations with joined outer and inner rings.
+Feature IDs include the element type (`node/123`, `way/123`, `relation/123`),
+and properties are independent copies of the OSM tags for direct style filters.
+When displaying imported OSM data, set its source attribution as well, for
+example `attribution: sources.osm().attribution`, including on a Bayern basemap.
+Ways with `area=no` remain lines; `area=yes` and common area tags distinguish
+closed polygons from closed roads. Node IDs define closure when available.
+Untagged helper nodes and successful relations' untagged member ways are omitted;
+`includeUntaggedNodes: true` retains all nodes.
+
+Missing, clipped or ambiguous geometry is reported, never replaced by a center
+point or a segment across missing nodes. Non-area relation types, OSM XML/PBF
+and topology repair are not implemented. `onError(error, elementIndex)` can skip
+individual invalid elements; indices start at one. Limits and Overpass server
+`remark` errors remain fatal. The module makes no Overpass network requests.
 
 ## Tile source schemes
 
@@ -290,6 +309,72 @@ Only request rows change. Geometry, wrapping, cache keys and tile events retain
 XYZ coordinates; `{-y}` remains an explicit inverted-XYZ placeholder even on a
 TMS source. This is row numbering support, not a WMTS capabilities parser or
 support for arbitrary projected tile matrix sets.
+
+## OSM and Bayern sources
+
+The optional `@karte.bayern/micromap/sources` module provides independent,
+editable Style v8 raster-source definitions and official Bayern vector-style
+URLs. Classic scripts use `lib/microMap.sources.min.js` and `microMapSources`.
+It does not fetch data on import and stays outside the general-purpose bundle.
+
+```js
+import { Map } from '@karte.bayern/micromap/bundle';
+import sources from '@karte.bayern/micromap/sources';
+
+const map = new Map({
+  container: 'map', center: [11.575, 48.137], zoom: 13, pixelRatio: 1.5,
+  style: sources.bayernVector('light')
+});
+```
+
+`bayernVector()` defaults to the provider's lightweight style. The official
+`standard`, `grau`, `luftbild`, `nacht`, `wandern`, `radln` and thematic style
+identifiers are also available. The real `light` and `standard` styles were
+checked against the renderer's style compiler; existing font/alignment and
+other documented approximations still apply. Data-driven `text-rotate`, used
+by Bayern's small-place labels, rotates text without rotating its icon.
+
+For raster basemaps, use `sources.osm()` or
+`sources.bayernRaster('by_webkarte')` as a style source. Bayern also offers
+`by_webkarte_grau`, `by_amtl_karte`, `by_dop`, `by_dop_cir` and the transparent
+`by_label` overlay. Each preset includes provider attribution and tile limits;
+Bayern sources use the advertised `smerc` (global EPSG:3857) WMTS matrix set,
+matrices 0–19, 256px tiles and advertised coverage bounds.
+
+```js
+const aerial = sources.bayernRaster('by_dop');
+const labels = sources.bayernRaster('by_label');
+const style = { version: 8, sources: { aerial, labels }, layers: [
+  { id: 'aerial', type: 'raster', source: 'aerial' },
+  { id: 'labels', type: 'raster', source: 'labels' }
+] };
+```
+
+The standalone raster module also accepts `bounds`. It skips out-of-coverage
+tiles before projection/request, shares cache entries between wrapped world
+copies, and avoids resizing unchanged canvases. `maxTiles` limits retained
+cache entries subject to the visible working set: visible tiles are retained
+even above the target, and offscreen LRU entries are removed after panning.
+This prevents repeated downloads when a viewport needs more tiles than the cap.
+With the standalone raster module, show the preset's attribution in the host UI;
+the MapLibre-shaped map shows source credits automatically.
+
+The OSM preset uses the [official HTTPS raster endpoint](https://operations.osmfoundation.org/policies/tiles/)
+and leaves HTTP caching and browser identification intact. Do not enable the
+core's prefetch/offline tools for this public endpoint. Other providers and
+self-hosted tiles can have different policies. Bayern presets follow the
+[official WMTS Capabilities](https://geoservices.bayern.de/od/wmts/geobasis/v1/1.0.0/WMTSCapabilities.xml),
+[vector-style catalogue](https://www.ldbv.bayern.de/produkte/karten/webvektor.html)
+and [source-credit requirements](https://geodaten.bayern.de/odd/m/3/pdf/WMTS_Nutzungshinweise.pdf)
+checked on 2026-11-10. They are not a capabilities parser or a source-availability
+guarantee; keep the credits and consult the current provider metadata when
+changing a layer.
+
+`demo/osm-bayern.html` combines these sources with a local OSM/Overpass JSON
+import and a clearly marked synthetic sample. It makes no automatic Overpass
+queries or offline downloads; OSM standard tiles load only when selected.
+An explicit import option can skip unsupported or incomplete objects and shows
+the skipped count; the default keeps import errors visible.
 
 ## Camera and UI
 
@@ -326,7 +411,8 @@ factories such as `ui.marker()` use `[latitude, longitude]`.
 | `field` | Editable annotations, undo/redo; load `geojson` first |
 | `measure` | Distances, areas and adapter-backed routes; load `geojson` first |
 | `inspect` | GeoJSON validation before import |
-| `formats` | TopoJSON and RFC 8142 GeoJSON Text Sequences to GeoJSON |
+| `formats` | TopoJSON, OSM/Overpass and RFC 8142 GeoJSON Text Sequences to GeoJSON |
+| `sources` | OSM raster and official Bayern raster/vector source presets |
 | `heatmap` | Weighted points with optional time filtering |
 | `graticule` | Coordinate grid |
 | `export` | PNG and print capture; cross-origin images need CORS permission |

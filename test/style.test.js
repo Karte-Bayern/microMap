@@ -42,7 +42,7 @@ class RecordingContext {
   closePath() {}
   arc() {}
   translate() {}
-  rotate() {}
+  rotate(angle) { this.ops.push({ op: 'rotate', angle }); }
   scale() {}
   setLineDash(dash) { this.dash = dash.slice(); }
   drawImage(image, ...args) { this.ops.push({ op: 'drawImage', src: image.src, args, alpha: this.globalAlpha, filter: this.filter }); }
@@ -371,6 +371,65 @@ test('places symbols like MapLibre: top layer first, anchors, fonts and wrapping
   assert.deepEqual(layer.getStyleReport().skippedLayers, []);
   layer.destroy();
   map.destroy();
+});
+
+for (const pitch of [0, 55]) {
+  test('Bayern-style text rotation preserves point anchors, wrapping and independent icons at pitch ' + pitch, async () => {
+    const style = { version: 8, sources: { places: { type: 'geojson', data: { type: 'Feature', properties: {
+      name: 'Ein langer Ortsname hier', rotation: 37
+    }, geometry: { type: 'Point', coordinates: [.001, .001] } } } }, layers: [{
+      id: 'names', type: 'symbol', source: 'places', layout: {
+        'text-field': ['get', 'name'], 'text-rotate': ['*', ['get', 'rotation'], -1],
+        'text-anchor': 'top-left', 'text-max-width': 6, 'text-size': 20,
+        'text-allow-overlap': true, 'icon-image': 'pin', 'icon-rotate': 15, 'icon-allow-overlap': true
+      }
+    }] };
+    const { map, layer, context } = setup(style, roads, { zoom: 4, pitch, tileSize: 512 }, { tiles: false });
+    try {
+      layer.addImage('pin', { width: 8, height: 8, data: new Uint8ClampedArray(256) });
+      await wait();
+      const text = context.ops.filter(op => op.op === 'text');
+      assert.ok(text.length > 1, 'rotated point labels retain word wrapping');
+      assert.ok(text.every(op => op.textAlign === 'left'), 'rotation does not recenter a top-left anchor');
+      assert.ok(context.ops.some(op => op.op === 'rotate' && Math.abs(op.angle + 37 * Math.PI / 180) < 1e-9), 'the real Bayern expression rotates text clockwise by its evaluated angle');
+      assert.ok(context.ops.some(op => op.op === 'rotate' && Math.abs(op.angle - 15 * Math.PI / 180) < 1e-9), 'the icon retains its own rotation');
+      assert.ok(!context.ops.some(op => op.op === 'rotate' && Math.abs(op.angle + 22 * Math.PI / 180) < 1e-9), 'text rotation does not leak into the icon');
+      assert.deepEqual(layer.getStyleReport().ignored, []);
+      assert.ok(layer.queryRenderedFeatures(map.project([.001, .001])).some(feature => feature.layer.id === 'names'), 'the rotated label remains queryable at its anchor');
+    } finally { layer.destroy(); map.destroy(); }
+  });
+}
+
+test('rotated point-label collisions use the rotated anchor rectangle', async () => {
+  const style = { version: 8, sources: { places: { type: 'geojson', data: { type: 'Point', coordinates: [.001, .001] } } }, layers: [
+    { id: 'lower', type: 'symbol', source: 'places', layout: { 'text-field': 'lower', 'text-size': 20, 'text-offset': [-.5, 1.5] } },
+    { id: 'upper', type: 'symbol', source: 'places', layout: { 'text-field': 'ALPHA', 'text-size': 20, 'text-anchor': 'top-left', 'text-rotate': 90 } }
+  ] };
+  const { map, layer, context } = setup(style, roads, { zoom: 4, tileSize: 512 }, { tiles: false });
+  try {
+    await wait();
+    const text = context.ops.filter(op => op.op === 'text').map(op => op.text);
+    assert.ok(text.includes('ALPHA'));
+    assert.ok(!text.includes('lower'), 'a lower-priority label cannot overlap the rotated text');
+  } finally { layer.destroy(); map.destroy(); }
+});
+
+test('line labels apply text rotation to glyphs without rotating their icons', async () => {
+  const style = { version: 8, sources: { route: { type: 'geojson', data: { type: 'LineString', coordinates: [[-.1, .001], [.1, .001]] } } }, layers: [{
+    id: 'route', type: 'symbol', source: 'route', layout: {
+      'symbol-placement': 'line', 'text-field': 'Route', 'text-size': 12, 'text-rotate': 30,
+      'icon-image': 'pin', 'text-allow-overlap': true, 'icon-allow-overlap': true
+    }
+  }] };
+  const { map, layer, context } = setup(style, roads, { zoom: 12, tileSize: 512 }, { tiles: false });
+  try {
+    layer.addImage('pin', { width: 8, height: 8, data: new Uint8ClampedArray(256) });
+    await wait();
+    assert.ok(context.ops.some(op => op.op === 'drawImage'), 'text and icon are composited');
+    assert.ok(context.ops.some(op => op.op === 'rotate' && Math.abs(op.angle - Math.PI / 6) < 1e-6), 'line glyphs receive the additional text angle');
+    const firstImage = context.ops.findIndex(op => op.op === 'drawImage');
+    assert.ok(!context.ops.slice(0, firstImage).some(op => op.op === 'rotate' && Math.abs(op.angle - Math.PI / 6) < 1e-6), 'the icon is drawn before any text-only rotation');
+  } finally { layer.destroy(); map.destroy(); }
 });
 
 test('merges same-name line parts so a label fits along the joined street', async () => {

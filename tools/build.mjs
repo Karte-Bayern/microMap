@@ -59,6 +59,13 @@ const builds = [
     budget: 8192
   },
   {
+    name: 'sources',
+    sourceUrl: new URL('../lib/microMap.sources.js', import.meta.url),
+    outputUrl: new URL('../lib/microMap.sources.min.js', import.meta.url),
+    banner: '/*! microMap.sources.js v' + packageJson.version + ' | MIT */',
+    budget: 4096
+  },
+  {
     name: 'measure',
     sourceUrl: new URL('../lib/microMap.measure.js', import.meta.url),
     outputUrl: new URL('../lib/microMap.measure.min.js', import.meta.url),

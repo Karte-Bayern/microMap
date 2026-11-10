@@ -99,7 +99,8 @@ attribution; the map shows the attribution of the sources a style uses.
 - [Core API](docs/reference.md) — camera, raster tiles, events, limits
 - [Optional modules](docs/modules.md) — vector styles, GeoJSON, UI, PMTiles…
 - [Elevation and heatmap layers](docs/modules.md#elevation-and-heatmap-style-layers) — DEM encodings and style examples
-- [Data formats](docs/modules.md#data-formats) — TopoJSON and GeoJSON Text Sequences imports
+- [Data formats](docs/modules.md#data-formats) — TopoJSON, OSM/Overpass and GeoJSON Text Sequences imports
+- [OSM and Bayern sources](docs/modules.md#osm-and-bayern-sources) — official tile presets, OSM/Overpass imports and a combined demo
 - [Demos](https://github.com/Karte-Bayern/microMap/tree/main/demo)
 
 ## Development

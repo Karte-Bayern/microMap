@@ -287,3 +287,184 @@ test('non-affine projection adapters retain triangle clipping', async () => {
   assert.equal(clips, ops.filter(op => op[0] === 'drawImage').length);
   raster.destroy(); map.destroy();
 });
+
+test('regional raster bounds avoid requests outside coverage and retain source snapshots', async () => {
+  imageURLs.length = 0;
+  const { map } = createMap();
+  const raster = microMapRaster(map);
+  const bounds = [8.97, 47.27, 13.84, 50.57];
+  try {
+    raster.addSource('bayern', { tiles: 'https://bounded.test/{z}/{x}/{y}.png', bounds });
+    const snapshot = raster.getSource('bayern');
+    assert.deepEqual(snapshot.bounds, bounds);
+    bounds[0] = -180;
+    snapshot.bounds[0] = -180;
+    assert.equal(raster.getSource('bayern').bounds[0], 8.97, 'caller and getter edits do not change coverage');
+    raster.addLayer({ id: 'bayern', source: 'bayern', type: 'raster' });
+    await wait();
+    assert.deepEqual(imageURLs, ['https://bounded.test/3/4/2.png'], 'only the visible tile intersecting Bavaria is requested');
+    map.setCenter([-75, 20]);
+    await wait();
+    assert.equal(imageURLs.length, 1, 'views outside coverage make no new requests');
+    map.setCenter([372.5, 48.6]);
+    await wait();
+    assert.equal(imageURLs.length, 1, 'a wrapped view shares the original image');
+    assert.ok(raster.getCanvas().getContext('2d').operations.some(op => op[0] === 'drawImage'));
+  } finally { raster.destroy(); map.destroy(); }
+});
+
+test('perspective raster bounds filter every requested level of detail', async () => {
+  imageURLs.length = 0;
+  const { map } = createMap();
+  map.setZoom(10); map.setPitch(60); map.setBearing(35);
+  const raster = microMapRaster(map);
+  const bounds = [8.97, 47.27, 13.84, 50.57];
+  try {
+    raster.addSource('bayern', { tiles: 'https://tilt-bounds.test/{z}/{x}/{y}.png', bounds });
+    raster.addLayer({ id: 'bayern', source: 'bayern', type: 'raster' });
+    await wait();
+    assert.ok(imageURLs.length > 0);
+    const levels = new Set();
+    for (const url of imageURLs) {
+      const [, z, x, y] = /\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(url).map(Number);
+      levels.add(z);
+      const count = 2 ** z;
+      const west = x / count * 360 - 180, east = (x + 1) / count * 360 - 180;
+      const north = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / count))) * 180 / Math.PI;
+      const south = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / count))) * 180 / Math.PI;
+      assert.ok(west < bounds[2] && east > bounds[0] && south < bounds[3] && north > bounds[1], 'requested tile intersects regional coverage: ' + url);
+    }
+    assert.ok(levels.size > 1, 'bounds work at multiple perspective detail levels');
+    const count = imageURLs.length;
+    map.setCenter([-75, 20]);
+    await wait();
+    assert.equal(imageURLs.length, count, 'far-away pitched views do not fetch Bavaria tiles');
+  } finally { raster.destroy(); map.destroy(); }
+});
+
+test('raster bounds validate before registering a source', () => {
+  const { map } = createMap();
+  const raster = microMapRaster(map);
+  try {
+    for (const bounds of [[0, 1, 2], [10, 50, 9, 51], [9, 51, 10, 50], [-181, 0, 10, 50], [0, 0, 181, 50], [0, -86, 10, 50], [0, 0, 10, 86], [0, 0, NaN, 50], [null, 0, 10, 50], [0, 0, '10', 50]]) {
+      assert.throws(() => raster.addSource('bad', { tiles: '/{z}/{x}/{y}.png', bounds }), /invalid bounds/);
+      assert.equal(raster.getSource('bad'), null);
+    }
+  } finally { raster.destroy(); map.destroy(); }
+});
+
+test('wrapped world copies share one raster request and canonical tile event', async () => {
+  imageURLs.length = 0;
+  const { map, container } = createMap();
+  container.clientWidth = 1024;
+  map.setZoom(0); map.resize();
+  const raster = microMapRaster(map, { maxTiles: 1 });
+  const events = [];
+  raster.on('tileload', event => events.push([event.z, event.x, event.y]));
+  try {
+    raster.addSource('world', { tiles: 'https://world.test/{z}/{x}/{y}.png' });
+    raster.addLayer({ id: 'world', source: 'world', type: 'raster' });
+    await wait();
+    assert.deepEqual(imageURLs, ['https://world.test/0/0/0.png']);
+    assert.deepEqual(events, [[0, 0, 0]], 'events expose canonical XYZ coordinates');
+    raster.redraw(); await wait();
+    assert.equal(imageURLs.length, 1, 'world copies cannot evict and reload each other');
+  } finally { raster.destroy(); map.destroy(); }
+});
+
+test('visible raster tiles survive a cache budget smaller than their cover', async () => {
+  imageURLs.length = 0;
+  const { map } = createMap();
+  const raster = microMapRaster(map, { maxTiles: 1 });
+  let loads = 0;
+  raster.on('tileload', () => loads++);
+  try {
+    raster.addSource('cover', { tiles: 'https://cover.test/{z}/{x}/{y}.png' });
+    raster.addLayer({ id: 'cover', source: 'cover', type: 'raster' });
+    await wait();
+    const original = imageURLs.slice();
+    assert.equal(original.length, 4, 'all four visible images load once despite the one-tile soft cap');
+    assert.equal(new Set(original).size, 4);
+    assert.equal(loads, 4);
+    raster.redraw(); await wait();
+    assert.deepEqual(imageURLs, original, 'settled tile-load and explicit frames keep the working set');
+    map.setCenter([-140, 48.6]);
+    await wait();
+    const afterPan = imageURLs.length;
+    assert.ok(afterPan > original.length, 'panning loads the new visible cover');
+    raster.redraw(); await wait();
+    assert.equal(imageURLs.length, afterPan, 'the new cover also settles');
+    map.setCenter([12.5, 48.6]);
+    await wait();
+    assert.ok(imageURLs.length > afterPan, 'offscreen old-cover entries were evicted and must load on return');
+  } finally { raster.destroy(); map.destroy(); }
+});
+
+test('flat raster detail follows world scale and source tile size', async () => {
+  for (const [coreSize, sourceSize, maxzoom, expectedZoom] of [[512, 256, 22, 4], [256, 512, 22, 2], [256, 256, 22, 3], [512, 256, 3, 3]]) {
+    imageURLs.length = 0;
+    const container = new Element();
+    const map = microMap(container, { tiles: false, center: [12.5, 48.6], zoom: 3, tileSize: coreSize, zoomAnimation: false });
+    const raster = microMapRaster(map);
+    try {
+      raster.addSource('detail', { tiles: 'https://detail.test/{z}/{x}/{y}.png', tileSize: sourceSize, maxzoom });
+      raster.addLayer({ id: 'detail', source: 'detail', type: 'raster' });
+      await wait();
+      assert.ok(imageURLs.length > 0);
+      assert.ok(imageURLs.every(url => url.startsWith('https://detail.test/' + expectedZoom + '/')), 'requested detail for core/source sizes ' + coreSize + '/' + sourceSize);
+      const state = map.getCameraState();
+      const tilePixels = state.worldSize / 2 ** expectedZoom;
+      const scale = 2 ** (state.zoom + Math.log2(coreSize / sourceSize) - expectedZoom);
+      assert.equal(tilePixels, sourceSize * scale, 'tile detail matches the actual projected world scale');
+    } finally { raster.destroy(); map.destroy(); }
+  }
+});
+
+test('hidden raster sources release surplus cover entries and replacement sources settle', async () => {
+  imageURLs.length = 0;
+  const { map } = createMap();
+  const raster = microMapRaster(map, { maxTiles: 1 });
+  try {
+    raster.addSource('cover', { tiles: 'https://hidden-cover.test/{z}/{x}/{y}.png' });
+    raster.addLayer({ id: 'cover', source: 'cover', type: 'raster' });
+    await wait();
+    assert.equal(imageURLs.length, 4);
+    raster.setLayoutProperty('cover', 'visibility', 'none'); await wait();
+    raster.setLayoutProperty('cover', 'visibility', 'visible'); await wait();
+    assert.equal(imageURLs.length, 7, 'only one of the now-offscreen cached images survives the soft cap');
+    raster.getSource('cover').setTiles('https://replacement-cover.test/{z}/{x}/{y}.png');
+    await wait();
+    assert.equal(imageURLs.length, 11, 'source replacement releases all old entries and loads four new images');
+    const requests = imageURLs.length;
+    raster.redraw(); await wait();
+    assert.equal(imageURLs.length, requests, 'replacement-source cover is retained');
+  } finally { raster.destroy(); map.destroy(); }
+});
+
+test('stable raster draws keep their canvas buffer and CSS dimensions', async () => {
+  const { map, container } = createMap();
+  const raster = microMapRaster(map);
+  const canvas = raster.getCanvas();
+  let resizes = 0, styleWrites = 0;
+  for (const key of ['width', 'height']) {
+    let value = canvas[key];
+    Object.defineProperty(canvas, key, { get: () => value, set: next => { value = next; resizes++; }, configurable: true });
+  }
+  canvas.style = new Proxy(canvas.style, { set(object, key, value) { if (key === 'width' || key === 'height') styleWrites++; object[key] = value; return true; } });
+  const previousDpr = global.devicePixelRatio;
+  try {
+    await wait();
+    assert.equal(resizes, 2); assert.equal(styleWrites, 2);
+    raster.redraw(); await wait();
+    assert.equal(resizes, 2, 'unchanged draw does not clear/reallocate the canvas through dimension setters');
+    assert.equal(styleWrites, 2, 'unchanged draw does not rewrite CSS dimensions');
+    global.devicePixelRatio = 2;
+    raster.redraw(); await wait();
+    assert.equal(resizes, 4); assert.equal(styleWrites, 2);
+    assert.equal(canvas.width, 512);
+    container.clientWidth = 300; map.resize();
+    await wait();
+    assert.equal(canvas.width, 600); assert.equal(canvas.style.width, '300px');
+    assert.equal(resizes, 5); assert.equal(styleWrites, 3);
+  } finally { global.devicePixelRatio = previousDpr; raster.destroy(); map.destroy(); }
+});

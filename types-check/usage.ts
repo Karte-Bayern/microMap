@@ -2,6 +2,7 @@ import microMap = require('../types/micromap');
 import maplibre = require('../types/maplibre');
 import bundle = require('../types/bundle');
 import formats = require('../types/formats');
+import sources = require('../types/sources');
 
 const options: microMap.MapOptions = { tiles: false, center: [11.5, 48.1], zoom: 12 };
 const tms: microMap.MapOptions = { tiles: '/{z}/{x}/{y}.png', scheme: 'tms' };
@@ -48,3 +49,13 @@ formats.geojsonSeq('\u001e{"type":"Point","coordinates":[12,48]}\n', {
 core.setTiles('/{z}/{x}/{y}.png', { scheme: 'quadkey' });
 // @ts-expect-error Unsupported conversion format.
 formats.parse('{}', { format: 'shapefile' });
+
+const aerial: maplibre.SourceSpecification = sources.bayernRaster('by_dop');
+map.addSource('aerial', aerial);
+const bayernStyle: string = sources.bayernVector('light');
+void bayernStyle;
+map.addSource('osm-map', sources.osm());
+const osmData: formats.FeatureCollection = formats.osm({ elements: [] }, { includeUntaggedNodes: true });
+map.addSource('osm-data', { type: 'geojson', data: osmData });
+// @ts-expect-error Unknown official raster layer.
+sources.bayernRaster('secret-layer');

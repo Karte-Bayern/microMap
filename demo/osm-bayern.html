@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>microMap · OSM und Bayern-Geodaten</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #243b48; background: #f4f6f5; }
+  main { max-width: 1200px; margin: auto; padding: 18px; }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 14px 0; }
+  select, button, input { font: inherit; max-width: 100%; }
+  button, select { padding: 7px 10px; }
+  #map { height: min(65vh, 600px); min-height: 320px; }
+  #status { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .note { color: #50626d; font-size: 13px; }
+  a { color: #165b91; }
+</style>
+<main>
+  <h1>OSM und Bayern-Geodaten</h1>
+  <p>Amtliche Hintergrundkarten mit eigenen OpenStreetMap-Daten kombinieren.</p>
+  <div class="controls">
+    <label>Hintergrund <select id="basemap">
+      <option value="by_webkarte">Webkarte Bayern</option>
+      <option value="by_webkarte_grau">Webkarte Grau Bayern</option>
+      <option value="by_amtl_karte">Topographische Karten Bayern</option>
+      <option value="by_dop">Luftbild Bayern</option>
+      <option value="vector">Webkarte Vektor Bayern · Leicht</option>
+      <option value="osm">OpenStreetMap Standard</option>
+    </select></label>
+    <label>OSM-/Overpass-JSON <input id="file" type="file" accept=".json,application/json"></label>
+    <label><input id="skip" type="checkbox"> Nicht darstellbare Objekte überspringen</label>
+    <button id="sample">Beispielobjekte anzeigen</button>
+  </div>
+  <div id="map" aria-label="Karte von München"></div>
+  <p id="status" role="status">Hintergrund wird geladen…</p>
+  <p class="note">Beispielobjekte sind synthetisch. Der Import verarbeitet lokale JSON-Dateien;
+    es werden keine Overpass-Abfragen gestartet. Ways benötigen vollständige Geometrien oder ihre referenzierten Nodes.
+    Es gibt keinen Offline-Download und kein automatisches Vorladen.</p>
+  <p class="note">Quellen: <a href="https://geodaten.bayern.de/opengeodata/">OpenData der Bayerischen Vermessungsverwaltung</a> ·
+    <a href="https://operations.osmfoundation.org/policies/tiles/">OSM-Kachelnutzung</a>.
+    Die jeweilige Quellenangabe steht in der Karte. Auswahl und Importe bleiben auf dieser Seite.</p>
+</main>
+<script src="../lib/microMap.min.js"></script>
+<script src="../lib/microMap.vector.min.js"></script>
+<script src="../lib/microMap.geojson.min.js"></script>
+<script src="../lib/microMap.camera.min.js"></script>
+<script src="../lib/microMap.compose.min.js"></script>
+<script src="../lib/microMap.ui.min.js"></script>
+<script src="../lib/microMap.maplibre.min.js"></script>
+<script src="../lib/microMap.sources.min.js"></script>
+<script src="../lib/microMap.formats.min.js"></script>
+<script>
+  const sources = microMapSources, formats = microMapFormats;
+  const status = document.getElementById('status');
+  let imported = null, importedName = '', skipped = 0, ready = false;
+  function selectedStyle() {
+    const value = document.getElementById('basemap').value;
+    if (value === 'vector') return sources.bayernVector('light');
+    const base = value === 'osm' ? sources.osm() : sources.bayernRaster(value);
+    return { version: 8, sources: { base }, layers: [{ id: 'base', type: 'raster', source: 'base' }] };
+  }
+  const map = new microMapGL.Map({ container: 'map', style: selectedStyle(), center: [11.575, 48.137], zoom: 13, attributionControl: { compact: false } });
+  map.addControl(new microMapGL.NavigationControl());
+  function showImport() {
+    if (!ready || !imported) return;
+    const existing = map.getSource('osm-import');
+    if (existing) existing.setData(imported);
+    else {
+      map.addSource('osm-import', { type: 'geojson', data: imported, attribution: sources.osm().attribution });
+      map.addLayer({ id: 'osm-areas', type: 'fill', source: 'osm-import', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#c45d2a', 'fill-opacity': .35 } });
+      map.addLayer({ id: 'osm-lines', type: 'line', source: 'osm-import', filter: ['==', '$type', 'LineString'], paint: { 'line-color': '#b84920', 'line-width': 4 } });
+      map.addLayer({ id: 'osm-points', type: 'circle', source: 'osm-import', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#b84920', 'circle-stroke-width': 3 } });
+    }
+    status.textContent = importedName + ': ' + imported.features.length + ' Geoobjekte geladen.' + (skipped ? ' ' + skipped + ' nicht darstellbare Objekte übersprungen.' : '');
+  }
+  function accept(data, name) {
+    let failures = 0;
+    const converted = formats.osm(data, document.getElementById('skip').checked ? { onError() { failures++; } } : {});
+    let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+    function coordinates(value) {
+      if (typeof value[0] === 'number') {
+        west = Math.min(west, value[0]); east = Math.max(east, value[0]);
+        south = Math.min(south, value[1]); north = Math.max(north, value[1]);
+      } else value.forEach(coordinates);
+    }
+    function geometry(value) {
+      if (!value) return;
+      if (value.type === 'GeometryCollection') value.geometries.forEach(geometry);
+      else coordinates(value.coordinates);
+    }
+    converted.features.forEach(feature => geometry(feature.geometry));
+    imported = converted; importedName = name; skipped = failures;
+    if (Number.isFinite(west)) map.fitBounds([west, south, east, north], { padding: 36, maxZoom: 16 });
+    showImport();
+  }
+  map.on('style.load', () => { ready = true; status.textContent = 'Hintergrund geladen.'; showImport(); });
+  map.on('error', event => { status.textContent = 'Quelle konnte nicht geladen werden: ' + (event.error && event.error.message || 'Unbekannter Fehler'); });
+  document.getElementById('basemap').onchange = () => {
+    ready = false; status.textContent = 'Hintergrund wird geladen…'; map.setStyle(selectedStyle());
+  };
+  document.getElementById('file').onchange = async event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try { accept(await file.text(), file.name); }
+    catch (error) { status.textContent = 'Import fehlgeschlagen: ' + error.message; }
+  };
+  document.getElementById('sample').onclick = () => {
+    accept({ elements: [
+      { type: 'node', id: 1, lon: 11.571, lat: 48.136 },
+      { type: 'node', id: 2, lon: 11.575, lat: 48.139 },
+      { type: 'node', id: 3, lon: 11.579, lat: 48.137 },
+      { type: 'way', id: 10, nodes: [1, 2, 3], tags: { highway: 'footway', name: 'Beispielweg' } },
+      { type: 'node', id: 20, lon: 11.575, lat: 48.137, tags: { amenity: 'drinking_water', name: 'Beispielpunkt' } }
+    ] }, 'Synthetisches Beispiel');
+  };
+</script>
+</html>

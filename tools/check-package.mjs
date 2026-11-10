@@ -67,6 +67,7 @@ if (typeof Map !== 'function' || typeof Marker !== 'function' || new LngLat(1, 2
 import vector from ${JSON.stringify(pkg.name + '/vector')};
 import geojson from ${JSON.stringify(pkg.name + '/geojson')};
 import formats from ${JSON.stringify(pkg.name + '/formats')};
+import sources from ${JSON.stringify(pkg.name + '/sources')};
 import ui from ${JSON.stringify(pkg.name + '/ui')};
 import style from ${JSON.stringify(pkg.name + '/styles/karte-bayern-blue')};
 if (typeof microMap !== 'function' || microMap.vector !== vector || microMap.geojson !== geojson || microMap.ui !== ui)
@@ -75,7 +76,9 @@ if (!Array.isArray(style().layers)) throw new Error('Style export is unusable');
   const formatSmoke = `
 const imported = formats.parse('{"type":"Point","coordinates":[12,48]}');
 if (imported.type !== 'FeatureCollection' || imported.features.length !== 1)
-  throw new Error('Format conversion export is unusable');`;
+  throw new Error('Format conversion export is unusable');
+if (!sources.bayernRaster().tiles[0].includes('/smerc/') || sources.osm().tileSize !== 256)
+  throw new Error('Source preset exports are unusable');`;
   await writeFile(join(temporary, 'smoke.mjs'), entry + formatSmoke);
   // Native ESM interop and the browser resolver must agree on one core instance.
   execFileSync(process.execPath, ['smoke.mjs'], { cwd: temporary, stdio: 'pipe' });
