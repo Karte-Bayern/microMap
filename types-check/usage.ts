@@ -1,10 +1,14 @@
 import microMap = require('../types/micromap');
 import maplibre = require('../types/maplibre');
 import bundle = require('../types/bundle');
+import formats = require('../types/formats');
 
 const options: microMap.MapOptions = { tiles: false, center: [11.5, 48.1], zoom: 12 };
+const tms: microMap.MapOptions = { tiles: '/{z}/{x}/{y}.png', scheme: 'tms' };
+void tms;
 declare const core: microMap.MicroMap;
 core.setView(options.center!, options.zoom).setPitch(20).getCamera();
+core.setTiles('/{z}/{x}/{y}.png', { scheme: 'tms' });
 
 const map: maplibre.Map = new maplibre.Map({ container: 'map', style: { version: 8, sources: {}, layers: [] } });
 map.addLayer({ id: 'background', type: 'background' }).setPaintProperty('background', 'background-color', '#fff');
@@ -33,3 +37,14 @@ map.addLayer({ id: 'density', type: 'heatmap', source: 'points', paint: {
 } });
 // @ts-expect-error DEM encoding factors are numeric.
 map.addSource('invalid-dem', { type: 'raster-dem', encoding: 'custom', redFactor: '256' });
+
+const imported: formats.FeatureCollection = formats.parse('{"type":"Point","coordinates":[12,48]}');
+map.addSource('imported', { type: 'geojson', data: imported });
+formats.topojson({ type: 'Topology', objects: {}, arcs: [] }, { object: ['roads'], maxCoordinates: 10000 });
+formats.geojsonSeq('\u001e{"type":"Point","coordinates":[12,48]}\n', {
+  onError(error, recordIndex) { const message: string = recordIndex + ': ' + error.message; void message; }
+});
+// @ts-expect-error Unknown tile schemes are rejected.
+core.setTiles('/{z}/{x}/{y}.png', { scheme: 'quadkey' });
+// @ts-expect-error Unsupported conversion format.
+formats.parse('{}', { format: 'shapefile' });

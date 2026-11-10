@@ -15,6 +15,10 @@
     "./geojson": "./lib/microMap.geojson.js",
     "./field": "./lib/microMap.field.js",
     "./inspect": "./lib/microMap.inspect.js",
+    "./formats": {
+      "types": "./types/formats.d.ts",
+      "default": "./lib/microMap.formats.js"
+    },
     "./measure": "./lib/microMap.measure.js",
     "./export": "./lib/microMap.export.js",
     "./pmtiles": "./lib/microMap.pmtiles.js",
@@ -48,6 +52,14 @@
     "./microMap.field.min.js": "./lib/microMap.field.min.js",
     "./microMap.inspect.js": "./lib/microMap.inspect.js",
     "./microMap.inspect.min.js": "./lib/microMap.inspect.min.js",
+    "./microMap.formats.js": {
+      "types": "./types/formats.d.ts",
+      "default": "./lib/microMap.formats.js"
+    },
+    "./microMap.formats.min.js": {
+      "types": "./types/formats.d.ts",
+      "default": "./lib/microMap.formats.min.js"
+    },
     "./microMap.measure.js": "./lib/microMap.measure.js",
     "./microMap.measure.min.js": "./lib/microMap.measure.min.js",
     "./microMap.export.js": "./lib/microMap.export.js",

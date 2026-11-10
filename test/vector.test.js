@@ -1365,7 +1365,7 @@ test('accepts callback style arrays so a feature can draw geometry and a text la
   map.destroy();
 });
 
-test('rejects TileJSON that is not an unambiguous XYZ MVT source', async () => {
+test('rejects TileJSON without MVT data or tile-coordinate placeholders', async () => {
   const { map } = createMap();
   await assert.rejects(
     () => microMapVector.fromTileJSON(map, '/bad.json', {

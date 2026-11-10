@@ -37,6 +37,7 @@ See [modules](modules.md).
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `tiles` | required | XYZ URL template, `(z, x, y) => url`, or `false` for a vector/overlay-only map |
+| `scheme` | `xyz` | Tile-row direction: `xyz` from north, `tms` from south |
 | `center`, `zoom` | `[0, 0]`, `0` | Initial position and fractional zoom |
 | `minZoom`, `maxZoom` | `0`, `19` | Camera zoom limits |
 | `tileSize` | `256` | Tile size in CSS pixels |
@@ -58,6 +59,11 @@ animated core zoom. Shift-drag selects a box; `boxSelect: false` disables it.
 
 Tile templates support `{z}`, `{x}`, `{y}`, `{-y}` (TMS row) and `{s}`
 (subdomain, selected from `subdomains`, default `abc`).
+With `scheme: 'tms'`, `{y}` and the tile callback's third argument use
+`2 ** z - 1 - xyzY`. `{-y}` always means inverted XYZ Y, so combining it with
+`scheme: 'tms'` does not invert it twice. Positioning, caches and tile events
+continue to use XYZ coordinates. `setTiles(template, { scheme: 'tms' })` switches
+the source; omitting `scheme` on a replacement defaults to `xyz`.
 
 ## Methods and events
 

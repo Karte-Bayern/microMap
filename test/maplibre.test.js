@@ -224,6 +224,40 @@ test('new Map() loads a whole MapLibre style and fires its lifecycle events in o
   map.remove();
 });
 
+test('MapLibre style loading passes TileJSON schemes and explicit overrides to tile requests', async () => {
+  const cases = [
+    { metadata: 'xyz', expected: 'xyz' },
+    { metadata: 'tms', expected: 'tms' },
+    { metadata: 'tms', explicit: 'xyz', expected: 'xyz' },
+    { metadata: 'xyz', explicit: 'tms', expected: 'tms' }
+  ];
+  let reference;
+  for (const entry of cases) {
+    const requests = [];
+    const document = { version: 8, sources: { base: { type: 'vector', url: 'https://tiles.test/tiles.json', ...(entry.explicit ? { scheme: entry.explicit } : {}) } },
+      layers: [{ id: 'roads', type: 'line', source: 'base', 'source-layer': 'roads' }] };
+    const { map } = createMap({ style: document, center: [0, 40], zoom: 3, fetch(url) {
+      requests.push(url);
+      return response(url.endsWith('tiles.json') ? { tilejson: '3.0.0', scheme: entry.metadata,
+        tiles: ['https://tiles.test/{z}/{x}/{y}/{-y}.pbf'], maxzoom: 3 } : roadTile());
+    } });
+    try {
+      const deadline = Date.now() + 2000;
+      while (!map.loaded() && Date.now() < deadline) await wait(5);
+      assert.ok(map.loaded());
+      const tiles = requests.filter(url => url.endsWith('.pbf')).map(url => url.replace('https://tiles.test/', '').split('/'));
+      assert.ok(tiles.length > 0);
+      if (!reference) reference = tiles;
+      assert.deepEqual(tiles.map(parts => parts.slice(0, 2)), reference.map(parts => parts.slice(0, 2)), 'scheme does not change zoom or column');
+      for (let i = 0; i < tiles.length; i++) {
+        assert.equal(+tiles[i][2], entry.expected === 'tms' ? 7 - +reference[i][2] : +reference[i][2]);
+        assert.equal(tiles[i][3], reference[i][3], 'explicit inverted XYZ placeholder is never inverted twice');
+      }
+      assert.ok(map.querySourceFeatures('base').length > 0, 'the decoder still exposes loaded source features');
+    } finally { map.remove(); }
+  }
+});
+
 test('MapLibre zoom levels: a 512px world, and project/unproject with LngLat objects', async () => {
   const { map } = createMap({ center: { lng: 0, lat: 0 }, zoom: 0 });
   await wait(60);

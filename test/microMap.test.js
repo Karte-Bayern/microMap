@@ -678,6 +678,46 @@ test('supports TMS and subdomain placeholders', async () => {
   map.destroy();
 });
 
+test('TMS schemes change request rows without moving the tile cover', async () => {
+  const views = ['xyz', 'tms'].map(scheme => createMap({ center: [0, 40], zoom: 3, tileBuffer: 0, scheme, tiles: '/{z}/{x}/{y}/{-y}.png' }));
+  function tiles(container) {
+    return container.children[0].children.flatMap(pane => pane.children).filter(node => node.tagName === 'IMG');
+  }
+  try {
+    await nextFrame();
+    const xyz = tiles(views[0].container), tms = tiles(views[1].container);
+    assert.ok(xyz.length > 0);
+    assert.equal(tms.length, xyz.length);
+    for (let i = 0; i < xyz.length; i++) {
+      const a = xyz[i].src.split('/'), b = tms[i].src.split('/');
+      assert.equal(b[2], a[2], 'column stays XYZ');
+      assert.equal(+b[3], 7 - +a[3], 'TMS rows count from the south');
+      assert.equal(b[4], a[4], '{-y} always means inverted XYZ row');
+      assert.equal(tms[i].style.cssText, xyz[i].style.cssText, 'the same tile covers the same position');
+    }
+    views[1].map.setTiles('/reset/{z}/{x}/{y}/{-y}.png');
+    await nextFrame();
+    assert.equal(tiles(views[1].container)[0].src, '/reset' + xyz[0].src, 'a replacement source defaults to XYZ');
+    assert.throws(() => views[1].map.setTiles('/bad/{z}/{x}/{y}.png', { scheme: 'other' }), /scheme/);
+    assert.equal(tiles(views[1].container)[0].src, '/reset' + xyz[0].src, 'invalid options do not change the active source');
+  } finally { views.forEach(view => view.map.destroy()); }
+});
+
+test('TMS callbacks and speculative requests receive south-origin rows', async () => {
+  const calls = [];
+  const { map } = createMap({ center: [0, 40], zoom: 3, tileBuffer: 0, scheme: 'tms',
+    tiles: (z, x, y) => { calls.push([z, x, y]); return '/' + z + '/' + x + '/' + y + '.png'; },
+    preload: { around: 1, delay: 0 }
+  });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.ok(calls.length > 0);
+    assert.ok(calls.every(([z, x, y]) => z === 3 && x >= 0 && x < 8 && y >= 0 && y < 8));
+    assert.ok(calls.some(([, , y]) => y >= 4), 'northern tiles use southern-origin row numbers');
+  } finally { map.destroy(); }
+  assert.throws(() => createMap({ scheme: 'quadkey' }), /scheme/);
+});
+
 test('destroy removes generated DOM and restores container state', async () => {
   const container = new FakeElement();
   container.style.cssText = 'height:300px';

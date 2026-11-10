@@ -220,6 +220,77 @@ Use `setPaintProperty()`, `setLayoutProperty()`, `setFilter()`,
 overlay. `on('click', layerId, handler)` registers a layer click handler.
 Call `destroy()` when the overlay is no longer needed.
 
+## Data formats
+
+The optional `formats` module converts
+[TopoJSON 1.0](https://github.com/topojson/topojson-specification) and
+[GeoJSON Text Sequences (RFC 8142)](https://www.rfc-editor.org/rfc/rfc8142)
+into GeoJSON FeatureCollections. It also normalises ordinary GeoJSON input.
+It has no runtime dependencies and is not included in the general-purpose
+bundle; load it only where data imports are needed.
+
+```js
+import formats from '@karte.bayern/micromap/formats';
+
+const response = await fetch('/areas.topojson');
+if (!response.ok) throw new Error('Area data could not be loaded');
+const data = formats.parse(await response.text(), {
+  format: 'topojson', object: 'areas'
+});
+map.addSource('areas', { type: 'geojson', data });
+map.addLayer({ id: 'areas', type: 'fill', source: 'areas',
+  paint: { 'fill-color': '#679a80', 'fill-opacity': 0.5 }
+});
+```
+
+Classic scripts use `lib/microMap.formats.min.js` and the global
+`microMapFormats`. The converters do not require a DOM or a running map.
+
+| Method | Input and result |
+| --- | --- |
+| `parse(input, options?)` | JSON object or text; detects Topology, ordinary GeoJSON or RS-framed sequences. Set `format` to `topojson`, `geojson` or `geojson-seq` to require that format. |
+| `topojson(input, options?)` | Topology object or JSON text; `object` selects a named object or array of names. Omit it to merge all named objects in input order. |
+| `geojsonSeq(text, options?)` | Complete sequence text with ASCII record separators (`\u001e`), including pretty-printed and mixed Geometry/Feature/FeatureCollection records. |
+
+TopoJSON conversion handles shared and reversed arcs, delta-encoded quantized
+arcs, scale/translate transforms, all geometry types, IDs, properties and
+bounding boxes. Additional position dimensions, such as elevation, remain
+unchanged. A selected top-level GeometryCollection becomes individual features;
+nested collections remain geometries. Input objects and shared arc coordinates
+are copied so edits to the output do not mutate the original topology.
+
+Sequence parsing is strict by default. To report a malformed record and continue
+at the next separator, pass `onError(error, recordIndex)`; indices start at one.
+A bad record contributes no partial features. Limit errors always stop parsing.
+Plain newline-delimited JSON is not RS-framed GeoJSON Text Sequences.
+
+All converters return a FeatureCollection; bare geometries are wrapped as
+features, and features may have null geometry. `maxFeatures` defaults to 50,000
+and `maxCoordinates` to 1,000,000; nested data is limited to 32 levels. The module
+parses complete inputs, not streaming chunks, and performs no CRS reprojection.
+Coordinates passed to a map must already be WGS 84 longitude/latitude.
+
+## Tile source schemes
+
+The core, vector renderer and optional raster module support XYZ and
+[TileJSON 3.0 TMS schemes](https://github.com/mapbox/tilejson-spec/tree/master/3.0.0#315-scheme)
+on the global Web Mercator grid. For Style v8 vector, raster or raster-dem
+sources, set `scheme: 'tms'`; source definitions override the scheme advertised
+by their TileJSON. The default is `xyz`.
+
+```js
+map.addSource('legacy-tiles', {
+  type: 'raster', tileSize: 256, scheme: 'tms',
+  tiles: ['/tiles/{z}/{x}/{y}.png']
+});
+map.addLayer({ id: 'legacy-tiles', type: 'raster', source: 'legacy-tiles' });
+```
+
+Only request rows change. Geometry, wrapping, cache keys and tile events retain
+XYZ coordinates; `{-y}` remains an explicit inverted-XYZ placeholder even on a
+TMS source. This is row numbering support, not a WMTS capabilities parser or
+support for arbitrary projected tile matrix sets.
+
 ## Camera and UI
 
 ```js
@@ -255,6 +326,7 @@ factories such as `ui.marker()` use `[latitude, longitude]`.
 | `field` | Editable annotations, undo/redo; load `geojson` first |
 | `measure` | Distances, areas and adapter-backed routes; load `geojson` first |
 | `inspect` | GeoJSON validation before import |
+| `formats` | TopoJSON and RFC 8142 GeoJSON Text Sequences to GeoJSON |
 | `heatmap` | Weighted points with optional time filtering |
 | `graticule` | Coordinate grid |
 | `export` | PNG and print capture; cross-origin images need CORS permission |

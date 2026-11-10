@@ -51,6 +51,14 @@ const builds = [
     budget: 4096
   },
   {
+    name: 'formats',
+    sourceUrl: new URL('../lib/microMap.formats.js', import.meta.url),
+    outputUrl: new URL('../lib/microMap.formats.min.js', import.meta.url),
+    banner: '/*! microMap.formats.js v' + packageJson.version + ' | MIT */',
+    // Import converters stay optional and outside the renderer bundles.
+    budget: 8192
+  },
+  {
     name: 'measure',
     sourceUrl: new URL('../lib/microMap.measure.js', import.meta.url),
     outputUrl: new URL('../lib/microMap.measure.min.js', import.meta.url),

@@ -9,7 +9,7 @@ A lightweight, dependency-free JavaScript map library with a **MapLibre-shaped
 API for a documented subset of MapLibre GL JS**. It renders MapLibre style
 documents (vector, GeoJSON and raster sources, sprites, expressions) with a
 real perspective camera, 3D buildings, markers, popups and controls — in about
-126 KB (min+gzip) for the general-purpose bundle, or from 16 KB for a raster-only map. MIT
+127 KB (min+gzip) for the general-purpose bundle, or from 16 KB for a raster-only map. MIT
 licensed.
 
 ```js
@@ -52,7 +52,7 @@ map.on('load', () => {
 
 | | microMap 0.3 | MapLibre GL JS 6 |
 | --- | --- | --- |
-| Download (min+gzip, general-purpose bundle) | ~126 KB | ~156 KB (main + worker) |
+| Download (min+gzip, general-purpose bundle) | ~127 KB | ~156 KB (main + worker) |
 | Raster-only map | ~16 KB | ~156 KB |
 | Runtime dependencies | none | several |
 | Rendering | Canvas 2D tiles, CSS 3D compositing, WebGL for buildings | WebGL / WebGPU |
@@ -99,6 +99,7 @@ attribution; the map shows the attribution of the sources a style uses.
 - [Core API](docs/reference.md) — camera, raster tiles, events, limits
 - [Optional modules](docs/modules.md) — vector styles, GeoJSON, UI, PMTiles…
 - [Elevation and heatmap layers](docs/modules.md#elevation-and-heatmap-style-layers) — DEM encodings and style examples
+- [Data formats](docs/modules.md#data-formats) — TopoJSON and GeoJSON Text Sequences imports
 - [Demos](https://github.com/Karte-Bayern/microMap/tree/main/demo)
 
 ## Development

@@ -44,8 +44,10 @@ declare namespace microMap {
   }
 
   interface MapOptions {
-    /** XYZ raster template, function, or false for a vector/overlay-only map. */
+    /** Raster template, function, or false for a vector/overlay-only map. */
     tiles: TileTemplate | false;
+    /** Tile-row direction; TMS counts rows from the south (default xyz). */
+    scheme?: 'xyz' | 'tms';
     center?: LonLat;
     zoom?: number;
     minZoom?: number;
@@ -224,7 +226,7 @@ declare namespace microMap {
     setPitch(pitch: number): this;
     fitBounds(bounds: BoundsLike, padding?: number | [number, number]): this;
     setMaxBounds(bounds: BoundsLike | null): this;
-    setTiles(tiles: TileTemplate | false, options?: { subdomains?: string; crossOrigin?: string | null; referrerPolicy?: string }): this;
+    setTiles(tiles: TileTemplate | false, options?: { scheme?: 'xyz' | 'tms'; subdomains?: string; crossOrigin?: string | null; referrerPolicy?: string }): this;
     panBy(offset: Point): this;
     setZoomRange(minZoom?: number | null, maxZoom?: number | null): this;
     setMinZoom(zoom?: number | null): this;

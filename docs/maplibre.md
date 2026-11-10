@@ -34,6 +34,8 @@ CSS with `micromap-` class names.
   GeoJSON inline or by URL (including clustering), raster/XYZ and WMS-style
   raster sources, sprites (`@2x` on dense screens), the style's default camera,
   `sky`.
+  Vector, raster and raster-dem sources accept `scheme: 'tms'` directly or
+  through TileJSON; an explicit source scheme overrides the metadata.
 - **Style editing**: `addSource`, `getSource().setData()`, `removeSource`,
   `addLayer(layer, beforeId)`, `moveLayer`, `removeLayer`, `setPaintProperty`,
   `setLayoutProperty`, `setFilter`, `setLayerZoomRange`, `getStyle`,
